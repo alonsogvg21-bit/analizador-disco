@@ -7,6 +7,11 @@ ayuda a encontrar archivos basura. Tiene tres interfaces sobre el mismo motor:
 - **Terminal**: `python main.py cli ...`
 - **Web local** (opcional): `python main.py web`
 
+**¿Solo quieres usar el programa?** Lee la [guía de uso](docs/GUIA_DE_USO.md)
+(también [en PDF](docs/GUIA_DE_USO.pdf), para imprimir o compartir):
+instalación, limpieza paso a paso y cómo instalar smartmontools para ver la
+salud de tus discos.
+
 Por defecto **solo lee**. Lo único que modifica el disco es la limpieza, que
 siempre muestra la lista exacta, pide confirmación y envía a la papelera.
 
