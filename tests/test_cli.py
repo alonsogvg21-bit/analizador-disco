@@ -175,3 +175,44 @@ def test_limpiar_argumentos_invalidos(arbol, capsys, sin_reglas):
         ejecutar(["limpiar", str(arbol)])                                # falta --categorias
     assert ejecutar(["limpiar", "-c", "cache"]) == 0                     # nada que limpiar
     assert "No hay nada que limpiar" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------ versión y ejecutable empaquetado
+
+def test_version(capsys):
+    from utils.info import NOMBRE, VERSION
+    assert main.main(["--version"]) == 0
+    assert capsys.readouterr().out.strip() == f"{NOMBRE} {VERSION}"
+    with pytest.raises(SystemExit) as salida:
+        ejecutar(["--version"])
+    assert salida.value.code == 0 and VERSION in capsys.readouterr().out
+
+
+def test_salida_sin_consola_no_rompe_nada(monkeypatch):
+    """En el ejecutable sin consola no hay salida de texto: un print() no debe fallar."""
+    import sys
+    for flujo in ("stdout", "stderr", "stdin"):
+        monkeypatch.setattr(sys, flujo, None)
+    main.preparar_salida(usar_terminal=False)
+    print("esto se descarta sin error")
+    assert sys.stdout is not None and sys.stderr is not None and sys.stdin is not None
+    assert sys.stdin.read() == ""
+
+
+def test_salida_normal_no_se_toca():
+    import sys
+    antes = (sys.stdout, sys.stderr, sys.stdin)
+    main.preparar_salida(usar_terminal=True)
+    assert (sys.stdout, sys.stderr, sys.stdin) == antes
+
+
+def test_tareas_programadas_usan_el_ejecutable_empaquetado(monkeypatch, tmp_path):
+    import sys
+    from core.programador import comando_de_escaneo, comando_de_salud
+    assert Path(comando_de_escaneo(tmp_path)[1]).name == "main.py"       # desde el código
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", r"C:\Programas\AnalizadorDisco\AnalizadorDisco.exe")
+    assert comando_de_escaneo(tmp_path) == [
+        r"C:\Programas\AnalizadorDisco\AnalizadorDisco.exe", "cli", "--silencioso", "guardar", str(tmp_path)]
+    assert comando_de_salud()[1:] == ["cli", "salud", "revisar"]

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=@NOMBRE@
+Comment=@DESCRIPCION@
+Exec=@COMANDO@
+Icon=analizador-disco
+Terminal=false
+Categories=Utility;System;Filesystem;
+Keywords=disco;espacio;limpiar;basura;duplicados;
+StartupWMClass=AnalizadorDisco

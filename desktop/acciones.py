@@ -60,7 +60,8 @@ def copiar_ruta(ruta: str | Path) -> None:
 class DialogoConfirmacion(QDialog):
     """Lista exacta de lo que se va a tocar, el espacio y la opción de simular."""
 
-    def __init__(self, parent: QWidget, elementos: list[ElementoBasura], accion: str) -> None:
+    def __init__(self, parent: QWidget, elementos: list[ElementoBasura], accion: str,
+                 simular: bool = True) -> None:
         super().__init__(parent)
         self._mover = accion == MOVER
         self.destino = ""
@@ -106,6 +107,9 @@ class DialogoConfirmacion(QDialog):
         caja.addWidget(self._aviso)
 
         self._simular = QCheckBox("Solo simular (muestra qué pasaría sin tocar nada)")
+        # Empieza marcada salvo que el usuario lo haya cambiado en Configuración:
+        # para tocar algo de verdad hay que desmarcarla a propósito.
+        self._simular.setChecked(simular)
         self._simular.toggled.connect(self._pintar_boton)
         caja.addWidget(self._simular)
 

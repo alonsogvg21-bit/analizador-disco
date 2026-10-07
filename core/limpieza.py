@@ -16,10 +16,20 @@ from dataclasses import dataclass, field
 
 from send2trash import send2trash
 
+from core import registro
 from core.basura import medir_ruta
 from core.modelos import ElementoBasura
 from utils.red import es_ruta_de_red
 from utils.seguridad import es_ruta_protegida
+
+
+# Por encima de este tamaño total, las interfaces piden confirmar dos veces.
+UMBRAL_DOBLE_CONFIRMACION = 1024 ** 3   # 1 GB
+
+
+def requiere_doble_confirmacion(elementos: Iterable[ElementoBasura]) -> bool:
+    """True si la acción afecta a más de 1 GB en total."""
+    return sum(e.tamano for e in elementos) > UMBRAL_DOBLE_CONFIRMACION
 
 
 @dataclass
@@ -90,4 +100,9 @@ def limpiar(elementos: Iterable[ElementoBasura], simulacion: bool = True) -> Res
             resultado.enviados.append(elemento)
             resultado.bytes_liberados += elemento.tamano
 
+    # Todo queda anotado en el registro de acciones, también lo que no se tocó.
+    accion = "simulación de papelera" if simulacion else "papelera"
+    registro.anotar_lote(
+        [(accion, "hecho", e.tamano, e.ruta, "") for e in resultado.enviados]
+        + [(accion, "omitido", e.tamano, e.ruta, motivo) for e, motivo in resultado.omitidos])
     return resultado

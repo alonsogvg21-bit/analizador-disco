@@ -16,6 +16,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core import registro
 from core.limpieza import motivo_de_rechazo
 from core.modelos import ElementoBasura
 from utils.formato import tamano_legible
@@ -130,4 +131,8 @@ def mover(
             resultado.omitidos.append(
                 (elemento, f"se movió solo en parte (había archivos en uso); revisa {nueva}"))
 
+    accion = "simulación de mover" if simulacion else "mover"
+    registro.anotar_lote(
+        [(accion, "hecho", e.tamano, e.ruta, f"a {nueva}") for e, nueva in resultado.movidos]
+        + [(accion, "omitido", e.tamano, e.ruta, motivo) for e, motivo in resultado.omitidos])
     return resultado

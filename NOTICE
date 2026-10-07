@@ -1,0 +1,98 @@
+Analizador de disco
+Copyright (c) 2026 alonsogvg21-bit
+Publicado bajo la licencia MIT (ver el archivo LICENSE).
+
+Este programa no envía datos a ningún servidor. Todo el análisis se hace en
+tu equipo. La única conexión saliente posible es el correo de alertas de
+salud del disco, y solo si tú lo configuras con tu propio servidor SMTP.
+
+================================================================================
+SOFTWARE DE TERCEROS
+================================================================================
+
+El programa usa las bibliotecas siguientes. En los paquetes instalables van
+incluidas, sin modificar, dentro de la carpeta "_internal". Cada una conserva
+su propia licencia y sus autores; el texto completo de cada licencia está en
+la dirección indicada.
+
+Qt 6 y PySide6 (Qt for Python)
+    Copyright (c) The Qt Company Ltd. y colaboradores
+    Licencia: GNU LGPL versión 3
+    https://www.qt.io/licensing  ·  https://doc.qt.io/qtforpython-6/licenses.html
+    Qt se usa como biblioteca dinámica, sin modificar. Las bibliotecas de Qt
+    están como archivos separados en "_internal/PySide6" y puedes sustituirlas
+    por otra versión compatible. El código fuente de Qt y de PySide6 está
+    disponible en https://download.qt.io y https://code.qt.io/pyside/pyside-setup.git
+
+Python
+    Copyright (c) Python Software Foundation
+    Licencia: PSF License Agreement
+    https://docs.python.org/3/license.html
+
+psutil
+    Copyright (c) Jay Loden, Dave Daeschler, Giampaolo Rodola
+    Licencia: BSD de 3 cláusulas
+    https://github.com/giampaolo/psutil/blob/master/LICENSE
+
+Send2Trash
+    Copyright (c) Virgil Dupras, Andrew Senetar
+    Licencia: BSD de 3 cláusulas
+    https://github.com/arsenetar/send2trash/blob/master/LICENSE
+
+Flask, Werkzeug, Jinja2, MarkupSafe, ItsDangerous, Click y Blinker
+    Copyright (c) Pallets y colaboradores
+    Licencia: BSD de 3 cláusulas (Blinker: MIT)
+    https://palletsprojects.com
+
+fpdf2
+    Copyright (c) Olivier Plathey, Max Pat, Lucas Cimon y colaboradores
+    Licencia: GNU LGPL versión 3
+    https://github.com/py-pdf/fpdf2/blob/master/LICENSE
+    Se usa como biblioteca, sin modificar; su código fuente está en la
+    dirección anterior.
+
+Pillow
+    Copyright (c) Jeffrey A. Clark y colaboradores
+    Licencia: MIT-CMU (HPND)
+    https://github.com/python-pillow/Pillow/blob/main/LICENSE
+
+fontTools
+    Copyright (c) Just van Rossum y colaboradores
+    Licencia: MIT
+    https://github.com/fonttools/fonttools/blob/main/LICENSE
+
+defusedxml
+    Copyright (c) Christian Heimes
+    Licencia: PSF License Agreement
+    https://github.com/tiran/defusedxml/blob/main/LICENSE
+
+d3-hierarchy
+    Copyright (c) Mike Bostock
+    Licencia: ISC
+    https://github.com/d3/d3-hierarchy/blob/main/LICENSE
+    Incluida en "web/static/vendor/d3-hierarchy.min.js".
+
+PyInstaller (cargador del ejecutable)
+    Copyright (c) PyInstaller Development Team
+    Licencia: GPL versión 2 con una excepción que permite distribuir programas
+    empaquetados bajo cualquier licencia.
+    https://pyinstaller.org/en/stable/license.html
+
+================================================================================
+SOFTWARE QUE NO SE INCLUYE
+================================================================================
+
+smartmontools (smartctl)
+    Licencia: GNU GPL versión 2
+    https://www.smartmontools.org
+    NO viene incluido con este programa. Es opcional y solo hace falta para la
+    sección "Salud del disco"; si quieres usarla, instálalo tú por separado.
+    El programa se limita a ejecutarlo y leer su respuesta.
+
+================================================================================
+SIN GARANTÍA
+================================================================================
+
+El programa se ofrece "tal cual", sin garantía de ningún tipo. Tú decides qué
+se mueve o se borra, y es tu responsabilidad tener copia de seguridad de lo
+que te importa. Consulta el archivo LICENSE.

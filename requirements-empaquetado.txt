@@ -1,0 +1,3 @@
+# Solo hace falta para compilar el programa (python build.py)
+-r requirements.txt
+pyinstaller>=6.0

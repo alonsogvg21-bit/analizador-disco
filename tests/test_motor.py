@@ -6,7 +6,7 @@ import csv
 import os
 import threading
 import time
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -337,7 +337,8 @@ def test_ruta_protegida_ignora_mayusculas_en_windows(tmp_path):
 def test_carpetas_criticas_por_sistema():
     entorno = {"SystemRoot": r"C:\Windows", "ProgramFiles": r"C:\Program Files",
                "ProgramFiles(x86)": r"C:\Program Files (x86)"}
-    nombres = {p.name for p in carpetas_criticas(WINDOWS, entorno)}
+    # PureWindowsPath: para que la prueba entienda rutas de Windows también en Linux.
+    nombres = {PureWindowsPath(str(p)).name for p in carpetas_criticas(WINDOWS, entorno)}
     assert nombres == {"Windows", "Program Files", "Program Files (x86)"}
 
     nombres = {p.name for p in carpetas_criticas(LINUX)}

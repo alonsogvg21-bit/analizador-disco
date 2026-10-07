@@ -7,10 +7,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFormLayout, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QFormLayout, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
 from core.alertas import leer_config, revisar
+from core.elevacion import EXPLICACION, leer_salud_con_permisos
 from core.salud import (
     BUENO, MALO, NOMBRES_ESTADO, PRECAUCION, SaludDisco, SmartctlNoInstalado, iniciar_autoprueba,
     leer_todos,
@@ -58,6 +59,11 @@ class VistaSalud(QWidget):
         self._nota = etiqueta("", "nota", ajustar=True)
         self._nota.hide()
         caja.addWidget(self._nota)
+        self._elevar = QPushButton("Leer con permisos de administrador…")
+        self._elevar.setToolTip("Antes de pedirlos se explica para qué son.")
+        self._elevar.clicked.connect(self.leer_con_permisos)
+        self._elevar.hide()
+        caja.addWidget(self._elevar, alignment=Qt.AlignmentFlag.AlignLeft)
         self._rejilla = QGridLayout()
         self._rejilla.setSpacing(14)
         caja.addLayout(self._rejilla)
@@ -77,7 +83,31 @@ class VistaSalud(QWidget):
         self._actualizar.setText("Leyendo discos…")
         self.ventana.lanzar(_leer, avisar, al_terminar=self._mostrar, al_fallar=self._fallo)
 
+    def leer_con_permisos(self) -> None:
+        """Explica por qué hacen falta los permisos y, solo si se acepta, los pide."""
+        aviso = QMessageBox(self)
+        aviso.setWindowTitle("Permisos de administrador")
+        aviso.setIcon(QMessageBox.Icon.Information)
+        aviso.setText(EXPLICACION)
+        continuar = aviso.addButton("Continuar", QMessageBox.ButtonRole.AcceptRole)
+        aviso.setDefaultButton(aviso.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole))
+        aviso.exec()
+        if aviso.clickedButton() is not continuar:
+            return
+        self._actualizar.setEnabled(False)
+        self._elevar.setEnabled(False)
+        self._actualizar.setText("Leyendo discos…")
+        self.ventana.lanzar(
+            lambda: (leer_salud_con_permisos(leer_config().umbrales()), []),
+            al_terminar=self._mostrar, al_fallar=self._fallo_permisos)
+
+    def _fallo_permisos(self, problema: Exception) -> None:
+        self._fin()
+        self._nota.setText(str(problema))
+        self._nota.show()
+
     def _fin(self) -> None:
+        self._elevar.setEnabled(True)
         self._actualizar.setEnabled(True)
         self._actualizar.setText("Actualizar")
 
@@ -99,6 +129,8 @@ class VistaSalud(QWidget):
             self._rejilla.addWidget(etiqueta("No se detectó ningún disco.", "suave"), 0, 0)
         for indice, disco in enumerate(discos):
             self._rejilla.addWidget(self._tarjeta(disco), indice // 2, indice % 2)
+        # Solo si algún disco lo exige se ofrece leer con permisos de administrador.
+        self._elevar.setVisible(any(d.falta_permiso for d in discos))
         self._rejilla.setColumnStretch(0, 1)
         self._rejilla.setColumnStretch(1, 1)
         self._nota.setVisible(bool(alertas))

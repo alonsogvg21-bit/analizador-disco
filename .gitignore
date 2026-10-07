@@ -7,3 +7,7 @@ venv/
 reporte-disco-*.html
 reporte-disco-*.csv
 reporte-disco-*.pdf
+
+# Empaquetado con PyInstaller
+build/
+dist/

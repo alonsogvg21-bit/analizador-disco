@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 
@@ -16,10 +17,31 @@ def iniciar(argumentos: list[str] | None = None) -> int:
               "o la web (python main.py web).", file=sys.stderr)
         return 1
 
+    from desktop.acerca import icono
+    from desktop.asistente import mostrar_si_hace_falta
+    from desktop.errores import instalar_gancho
     from desktop.ventana import VentanaPrincipal
+    from utils.info import NOMBRE, NOMBRE_EJECUTABLE, VERSION
+
+    if os.name == "nt":
+        # Sin esto, Windows agrupa la ventana con "Python" en la barra de tareas
+        # y muestra el icono de Python en lugar del nuestro.
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                f"analizador-disco.{NOMBRE_EJECUTABLE}")
+        except (AttributeError, OSError):
+            pass
 
     app = QApplication.instance() or QApplication(argumentos or sys.argv[:1])
-    app.setApplicationName("Analizador de disco")
+    app.setApplicationName(NOMBRE)
+    app.setApplicationDisplayName(NOMBRE)
+    app.setApplicationVersion(VERSION)
+    app.setWindowIcon(icono())
     ventana = VentanaPrincipal()
+    instalar_gancho(ventana)
     ventana.show()
+    # Primera ejecución: se explica qué hace el programa. Si no se acepta, se cierra.
+    if not mostrar_si_hace_falta(ventana):
+        return 0
     return app.exec()

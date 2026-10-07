@@ -63,6 +63,8 @@ def ventana(app, monkeypatch):
     monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: 0)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: 0)
+    from desktop.errores import DialogoError
+    monkeypatch.setattr(DialogoError, "exec", lambda self: 0)
     v = VentanaPrincipal()
     v.resize(1100, 720)
     v.show()
@@ -332,10 +334,12 @@ def test_lo_protegido_no_se_ofrece(escaneada, monkeypatch):
 def test_dialogo_de_confirmacion(app, escaneada, arbol, tmp_path):
     elementos = [elemento_de(escaneada.resultado, str(arbol / "fotos" / "a.jpg")),
                  elemento_de(escaneada.resultado, str(arbol / "videos"))]
+    # Por seguridad, la ventana se abre con «Solo simular» ya marcado.
     dialogo = DialogoConfirmacion(escaneada, elementos, PAPELERA)
-    assert dialogo._confirmar.text() == "Sí, enviar a la papelera" and not dialogo.simulacion
-    dialogo._simular.setChecked(True)
     assert dialogo._confirmar.text() == "Simular" and dialogo.simulacion
+    dialogo._simular.setChecked(False)
+    assert dialogo._confirmar.text() == "Sí, enviar a la papelera" and not dialogo.simulacion
+    assert DialogoConfirmacion(escaneada, elementos, PAPELERA, simular=False).simulacion is False
 
     mover = DialogoConfirmacion(escaneada, elementos, MOVER)
     mover._campo_destino.setText(str(tmp_path / "no-existe"))
@@ -424,3 +428,186 @@ def test_configuracion_guarda_preferencias(app, ventana):
     vista._tema.setCurrentIndex(2)
     assert ventana.tema() == "oscuro"
     vista._tema.setCurrentIndex(1)
+
+
+# ------------------------------------------------------------ icono, nombre y versión
+
+def test_acerca_de_muestra_nombre_y_version(app, ventana):
+    from desktop.acerca import DialogoAcercaDe, icono
+    from utils.info import NOMBRE, VERSION
+    assert not icono().isNull()                       # el archivo del icono existe y se carga
+    assert ventana.windowTitle() == NOMBRE and not ventana.windowIcon().isNull()
+    dialogo = DialogoAcercaDe(ventana)
+    assert NOMBRE in dialogo.windowTitle() and dialogo.version.text() == f"Versión {VERSION}"
+    textos = " ".join(e.text() for e in dialogo.findChildren(type(dialogo.version)))
+    assert NOMBRE in textos and "Licencia MIT" in textos and "github.com" in textos
+
+
+def test_f1_abre_acerca_de(app, ventana, monkeypatch):
+    from desktop.acerca import DialogoAcercaDe
+    abiertos = []
+    monkeypatch.setattr(DialogoAcercaDe, "exec", lambda self: abiertos.append(self) or 0)
+    QTest.keyClick(ventana, Qt.Key.Key_F1)
+    assert len(abiertos) == 1
+
+
+# ------------------------------------------------------------ uso por otras personas
+
+def test_asistente_inicial(app, ventana):
+    from desktop.asistente import PAGINAS, AsistenteInicial, mostrar_si_hace_falta
+    asistente = AsistenteInicial(ventana)
+    assert asistente.paginas.count() == len(PAGINAS) == 3
+    todo = " ".join(parrafo for _, parrafos in PAGINAS for parrafo in parrafos)
+    for esperado in ("solo lee", "simulación", "papelera", "no envía datos a ningún servidor",
+                     "sin garantía", "confirmar dos veces", "administrador"):
+        assert esperado in todo, esperado
+
+    assert asistente.siguiente.text() == "Siguiente" and not asistente.atras.isEnabled()
+    asistente._avanzar()
+    asistente._avanzar()
+    # Última página: no se puede empezar sin marcar la casilla.
+    assert asistente.siguiente.text() == "Empezar" and not asistente.siguiente.isEnabled()
+    asistente.entendido.setChecked(True)
+    assert asistente.siguiente.isEnabled()
+    asistente._avanzar()
+    assert asistente.result() == QDialog.DialogCode.Accepted
+
+    del mostrar_si_hace_falta
+
+
+def test_el_asistente_solo_aparece_la_primera_vez(app, ventana, monkeypatch):
+    from desktop import asistente
+    veces = []
+    monkeypatch.setattr(asistente.AsistenteInicial, "exec",
+                        lambda self: veces.append(1) or QDialog.DialogCode.Accepted)
+    assert asistente.mostrar_si_hace_falta(ventana) and asistente.mostrar_si_hace_falta(ventana)
+    assert veces == [1]
+
+
+def test_si_no_se_acepta_el_asistente_no_se_da_por_visto(app, ventana, monkeypatch):
+    from desktop import asistente
+    monkeypatch.setattr(asistente.AsistenteInicial, "exec", lambda self: QDialog.DialogCode.Rejected)
+    assert asistente.mostrar_si_hace_falta(ventana) is False
+    assert int(ventana.ajustes.value("asistente_visto", 0) or 0) == 0
+
+
+def test_simulacion_activada_por_defecto(app, ventana):
+    assert ventana.simular_por_defecto() is True
+    ventana.vistas["Configuración"]._simular.setChecked(False)
+    assert ventana.simular_por_defecto() is False
+    ventana.vistas["Configuración"]._simular.setChecked(True)
+
+
+def test_doble_confirmacion_en_el_escritorio(app, escaneada, arbol, monkeypatch):
+    preguntas = []
+    monkeypatch.setattr("core.limpieza.send2trash", shutil.rmtree)
+    monkeypatch.setattr("desktop.ventana.requiere_doble_confirmacion", lambda elementos: True)
+    confirmar_sin_preguntar(monkeypatch, simulacion=False)
+    carpeta = elemento_de(escaneada.resultado, str(arbol / "proyecto" / "node_modules"))
+
+    # Primera vez: se responde que no a la segunda pregunta. No se toca nada.
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: preguntas.append(a[2]) or QMessageBox.StandardButton.No)
+    escaneada.realizar(PAPELERA, [carpeta])
+    app.processEvents()
+    assert len(preguntas) == 1 and "más de 1 GB" in preguntas[0]
+    assert (arbol / "proyecto" / "node_modules").exists() and "Cancelado" in escaneada._mensaje.text()
+
+    # Segunda vez: se confirma dos veces.
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    escaneada.realizar(PAPELERA, [carpeta])
+    esperar(app, lambda: "en la papelera" in escaneada._mensaje.text())
+    assert not (arbol / "proyecto" / "node_modules").exists()
+
+
+def test_la_simulacion_no_pide_la_segunda_confirmacion(app, escaneada, arbol, monkeypatch):
+    def prohibido(*a, **k):
+        raise AssertionError("simular no debe pedir la segunda confirmación")
+    monkeypatch.setattr(QMessageBox, "question", prohibido)
+    monkeypatch.setattr("desktop.ventana.requiere_doble_confirmacion", lambda elementos: True)
+    confirmar_sin_preguntar(monkeypatch, simulacion=True)
+    escaneada.realizar(PAPELERA, [elemento_de(escaneada.resultado, str(arbol / "fotos" / "a.jpg"))])
+    esperar(app, lambda: "Simulación" in escaneada._mensaje.text())
+
+
+def test_errores_amigables_con_detalle_para_copiar(app, ventana):
+    from desktop.errores import DialogoError, detalle_tecnico, mensaje_amigable
+    from utils.info import VERSION
+    assert "permisos" in mensaje_amigable(PermissionError(13, "Access is denied"))
+    assert "ya no existe" in mensaje_amigable(FileNotFoundError(2, "No such file"))
+    assert "espacio" in mensaje_amigable(OSError(28, "No space left on device"))
+    assert mensaje_amigable(ValueError("La carpeta de destino no existe: X")) == "La carpeta de destino no existe: X"
+    assert "inesperado" in mensaje_amigable(KeyError("x"))
+    assert "Traceback" not in mensaje_amigable(ZeroDivisionError("division by zero"))
+
+    try:
+        1 / 0
+    except ZeroDivisionError as problema:
+        detalle = detalle_tecnico(problema)
+    assert "ZeroDivisionError" in detalle and VERSION in detalle and "test_desktop.py" in detalle
+
+    dialogo = DialogoError(ventana, "Mensaje claro.", detalle)
+    assert dialogo.texto.isHidden()                       # el detalle no se muestra de entrada
+    dialogo._alternar()
+    assert not dialogo.texto.isHidden()
+    dialogo._copiar()
+    assert QApplication.clipboard().text() == detalle and dialogo.copiar.text() == "Copiado"
+
+
+def test_un_error_no_previsto_no_cierra_el_programa(app, ventana, monkeypatch):
+    import sys
+    from desktop import errores
+    mostrados = []
+    monkeypatch.setattr(errores.DialogoError, "exec", lambda self: mostrados.append(self.mensaje.text()) or 0)
+    anterior = sys.excepthook
+    try:
+        errores.instalar_gancho(ventana)
+        try:
+            raise RuntimeError("Fallo de prueba")
+        except RuntimeError as problema:
+            sys.excepthook(type(problema), problema, problema.__traceback__)
+    finally:
+        sys.excepthook = anterior
+    assert mostrados == ["Fallo de prueba"]
+    from core import registro
+    assert any("error" in linea and "Fallo de prueba" in linea for linea in registro.ultimas_lineas())
+
+
+def test_acerca_de_incluye_licencias_y_privacidad(app, ventana):
+    from desktop.acerca import DialogoAcercaDe, DialogoTexto, texto_de
+    dialogo = DialogoAcercaDe(ventana)
+    textos = " ".join(e.text() for e in dialogo.findChildren(type(dialogo.version)))
+    assert "no envía datos a ningún servidor" in textos
+    botones = [b.text() for b in dialogo.findChildren(type(ventana._cancelar))]
+    assert "Licencia" in botones and "Licencias de terceros" in botones
+    assert "PySide6" in DialogoTexto(dialogo, "x", texto_de("NOTICE")).texto.toPlainText()
+    assert "MIT License" in texto_de("LICENSE")
+    assert "No se encontró" in texto_de("NO-EXISTE")
+
+
+def test_permisos_de_administrador_solo_si_un_disco_los_exige(app, ventana, monkeypatch):
+    from core import salud
+    from tests.test_salud import SmartctlFalso
+    vista = ventana.vistas["Salud del disco"]
+
+    monkeypatch.setattr(salud, "buscar_smartctl", lambda: "smartctl")
+    monkeypatch.setattr(salud, "_ejecutar", SmartctlFalso())
+    vista.cargar(avisar=False)
+    esperar(app, lambda: vista._actualizar.isEnabled())
+    app.processEvents()
+    assert vista._elevar.isHidden()                       # todo se lee sin permisos: no se ofrece
+
+    monkeypatch.setattr(salud, "_ejecutar", SmartctlFalso(
+        {"/dev/sda": "nvme_sano", "/dev/sdb": "sin_permisos_windows_real", "/dev/nvme0": "ssd_sata"}))
+    vista.cargar(avisar=False)
+    esperar(app, lambda: vista._actualizar.isEnabled())
+    app.processEvents()
+    assert not vista._elevar.isHidden()
+
+    # Si se cancela la explicación, no se pide nada.
+    lanzados = []
+    monkeypatch.setattr("desktop.vistas.salud.leer_salud_con_permisos", lambda *a: lanzados.append(1) or [])
+    monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: None)
+    vista.leer_con_permisos()
+    app.processEvents()
+    assert lanzados == []

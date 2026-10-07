@@ -1,4 +1,4 @@
-"""Punto de entrada único.
+"""Punto de entrada único (también del ejecutable empaquetado).
 
     python main.py                     -> aplicación de escritorio (interfaz principal)
     python main.py cli <comando> ...   -> terminal
@@ -7,21 +7,65 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
-USO = """Analizador de disco
+from utils.info import NOMBRE, VERSION
+
+USO = f"""{NOMBRE} {VERSION}
 
 Uso:
   python main.py                            Abrir la aplicación de escritorio
   python main.py cli <comando> [opciones]   Usar desde la terminal
   python main.py web                        Abrir la interfaz web local (opcional)
+  python main.py --version                  Mostrar la versión
 
 Para ver los comandos de terminal:  python main.py cli --help
+(Con el programa empaquetado, sustituye "python main.py" por el ejecutable.)
 """
+
+
+def preparar_salida(usar_terminal: bool) -> None:
+    """Deja listas la salida y la entrada de texto en el ejecutable sin consola.
+
+    El ejecutable se construye "sin ventana de consola" para que al abrir la
+    aplicación de escritorio no aparezca una ventana negra. La contrapartida
+    es que arranca sin salida de texto. Aquí se arregla:
+    - en modo terminal o web, se conecta a la terminal desde la que se lanzó;
+    - si no hay terminal (doble clic, tarea programada), la salida se descarta
+      para que un simple print() no provoque un error.
+    Con "python main.py" normal no hace nada.
+    """
+    if sys.stdout is not None and sys.stderr is not None and sys.stdin is not None:
+        return
+
+    conectado = False
+    if usar_terminal and os.name == "nt":
+        import ctypes
+        nucleo = ctypes.windll.kernel32
+        if nucleo.AttachConsole(-1):   # -1 = la consola del proceso que nos lanzó
+            conectado = True
+            codificacion = f"cp{nucleo.GetConsoleOutputCP()}"
+            try:
+                if sys.stdout is None:
+                    sys.stdout = open("CONOUT$", "w", encoding=codificacion, errors="replace", buffering=1)
+                if sys.stderr is None:
+                    sys.stderr = sys.stdout
+                if sys.stdin is None:
+                    sys.stdin = open("CONIN$", "r", encoding=f"cp{nucleo.GetConsoleCP()}")
+            except OSError:
+                conectado = False
+
+    if not conectado:
+        nada = open(os.devnull, "w", encoding="utf-8")
+        sys.stdout = sys.stdout or nada
+        sys.stderr = sys.stderr or nada
+        sys.stdin = sys.stdin or open(os.devnull, "r", encoding="utf-8")
 
 
 def main(argumentos: list[str] | None = None) -> int:
     argumentos = sys.argv[1:] if argumentos is None else argumentos
+    preparar_salida(usar_terminal=bool(argumentos))
 
     if not argumentos:
         # Import tardío: la terminal y la web no necesitan cargar Qt.
@@ -29,6 +73,9 @@ def main(argumentos: list[str] | None = None) -> int:
         return iniciar()
     if argumentos[0] in ("-h", "--help"):
         print(USO)
+        return 0
+    if argumentos[0] in ("-V", "--version"):
+        print(f"{NOMBRE} {VERSION}")
         return 0
 
     modo, resto = argumentos[0], argumentos[1:]

@@ -106,6 +106,7 @@ class SaludDisco:
     estado: str = DESCONOCIDO
     motivos: list[str] = field(default_factory=list)
     error: str = ""                      # por qué no hay datos, si no los hay
+    falta_permiso: bool = False          # no se pudo leer por no ser administrador
 
     @property
     def clave(self) -> str:
@@ -324,6 +325,7 @@ def interpretar(datos: dict, dispositivo: str = "", umbrales: Umbrales | None = 
         codigo = datos.get("smartctl", {}).get("exit_status", 0)
         if _sin_permisos(datos):
             disco.error = instrucciones_de_permisos()
+            disco.falta_permiso = True
         elif codigo & _SALIDA_NO_ABRE:
             disco.error = "No se pudo abrir el disco: " + (_mensajes(datos) or "sin más detalles") + "."
         else:
@@ -385,6 +387,11 @@ def listar_discos(ejecutar: Ejecutor | None = None) -> list[dict]:
             vistos.add(nombre)
             discos.append({"name": nombre, "type": dispositivo.get("type", "")})
     return discos
+
+
+def leer_crudo(nombre: str, tipo: str = "", ejecutar: Ejecutor | None = None) -> dict:
+    """La respuesta de 'smartctl -a' tal cual, sin interpretar. Solo lectura."""
+    return _consultar(["-a"] + (["-d", tipo] if tipo else []) + [nombre], ejecutar)
 
 
 def leer_disco(nombre: str, tipo: str = "", ejecutar: Ejecutor | None = None,

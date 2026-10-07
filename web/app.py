@@ -28,7 +28,7 @@ from core.consulta import listar_archivos
 from core.tipos import clasificar
 from core.discos import resumen_discos
 from core.historial import comparar, listar_escaneos
-from core.limpieza import limpiar
+from core.limpieza import limpiar, requiere_doble_confirmacion
 from core.programador import ErrorProgramador, crear_tarea, listar_tareas, quitar_tarea
 from core.reporte_pdf import exportar_pdf
 from core.alertas import leer_config
@@ -39,6 +39,7 @@ from core.salud import (
 from core.modelos import ElementoBasura
 from core.mover import mover
 from core.consulta import buscar_archivo
+from utils.rutas import ruta_recurso
 from utils.seguridad import es_ruta_protegida
 from core.modelos import a_dict
 from core.reporte import exportar_csv, exportar_html, reunir_datos
@@ -58,7 +59,9 @@ PREFIJO_ARCHIVO = "archivo:"
 
 
 def crear_app(gestor: GestorEscaneo | None = None) -> Flask:
-    app = Flask(__name__)
+    # Las carpetas se indican a mano para que se encuentren también dentro del ejecutable.
+    app = Flask(__name__, template_folder=str(ruta_recurso("web", "templates")),
+                static_folder=str(ruta_recurso("web", "static")))
     app.config["TOKEN"] = secrets.token_urlsafe(32)
     app.config["GESTOR"] = gestor = gestor or GestorEscaneo()
 
@@ -107,6 +110,10 @@ def crear_app(gestor: GestorEscaneo | None = None) -> Flask:
         simulacion = bool(datos.get("simulacion", True))
         if not simulacion and datos.get("confirmado") is not True:
             return None, simulacion, error("Falta la confirmación.", 400)
+        if (not simulacion and requiere_doble_confirmacion(elegidos)
+                and datos.get("confirmado_doble") is not True):
+            return None, simulacion, error(
+                "Son más de 1 GB: hace falta confirmar por segunda vez.", 400)
         return elegidos, simulacion, None
 
     # ------------------------------------------------------------ página

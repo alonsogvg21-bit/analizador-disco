@@ -10,6 +10,119 @@ ayuda a encontrar archivos basura. Tiene tres interfaces sobre el mismo motor:
 Por defecto **solo lee**. Lo único que modifica el disco es la limpieza, que
 siempre muestra la lista exacta, pide confirmación y envía a la papelera.
 
+## Capturas
+
+Las capturas usan una carpeta de ejemplo y datos de salud ficticios.
+
+**Mapa de bloques**: cada bloque es una carpeta o un archivo, y su tamaño en
+pantalla es proporcional al espacio que ocupa.
+
+![Mapa de bloques con los archivos coloreados por tipo](docs/capturas/mapa.png)
+
+**Inicio**: una tarjeta por disco y el botón para escanear.
+
+![Pantalla de inicio con las tarjetas de los discos](docs/capturas/inicio.png)
+
+**Archivos basura**: categorías con casillas y contador del espacio a liberar.
+
+![Archivos basura con dos carpetas regenerables marcadas](docs/capturas/basura.png)
+
+**Salud del disco**: lo que cada disco informa por SMART, con semáforo y medidores.
+
+![Tarjetas de salud de tres discos](docs/capturas/salud.png)
+
+<details>
+<summary>Más capturas: árbol, tabla de archivos, tipos, duplicados, historial y modo oscuro</summary>
+
+**Árbol de carpetas**
+
+![Árbol de carpetas con tamaño y porcentaje](docs/capturas/arbol.png)
+
+**Tabla de archivos, con orden y filtros**
+
+![Tabla de archivos ordenada por tamaño](docs/capturas/archivos.png)
+
+**Tipos de archivo**
+
+![Barras con el espacio que ocupa cada tipo de archivo](docs/capturas/tipos.png)
+
+**Duplicados**
+
+![Grupos de archivos duplicados con las copias marcadas](docs/capturas/duplicados.png)
+
+**Historial**
+
+![Gráfica de uso en el tiempo y comparación entre dos escaneos](docs/capturas/historial.png)
+
+**Modo oscuro**
+
+![Mapa de bloques en modo oscuro, dentro de una carpeta](docs/capturas/mapa-oscuro.png)
+
+</details>
+
+## Instalación (sin Python)
+
+Descarga el archivo de tu sistema desde la página de
+[versiones](https://github.com/alonsogvg21-bit/analizador-disco/releases).
+No hace falta instalar Python ni nada más.
+
+| Sistema | Archivo | Cómo se usa |
+|---|---|---|
+| Windows 10 y 11 | `AnalizadorDisco-X.Y.Z-windows-x64-setup.exe` | Doble clic y seguir el asistente. Crea el acceso directo y el desinstalador. No pide permisos de administrador. |
+| Windows, sin instalar | `...-windows-x64-portable.zip` | Descomprime la carpeta y abre `AnalizadorDisco.exe`. |
+| Ubuntu, Debian, Mint | `analizador-disco_X.Y.Z_amd64.deb` | `sudo apt install ./analizador-disco_X.Y.Z_amd64.deb` |
+| Otros Linux | `AnalizadorDisco-X.Y.Z-x86_64.AppImage` | `chmod +x` al archivo y doble clic. |
+
+- **Aviso de Windows al instalar.** Si el instalador no está firmado, SmartScreen
+  muestra "Windows protegió su PC". Pulsa *Más información* y luego *Ejecutar de
+  todas formas*. Antes, comprueba la descarga con la suma SHA-256.
+- **Comprobar la descarga.** Cada versión incluye `SHA256SUMS-windows.txt` y
+  `SHA256SUMS-linux.txt`:
+
+  ```powershell
+  Get-FileHash .\AnalizadorDisco-1.0.0-windows-x64-setup.exe -Algorithm SHA256
+  ```
+
+  ```bash
+  sha256sum -c SHA256SUMS-linux.txt
+  ```
+
+- **Salud del disco (opcional).** Esa sección necesita smartmontools, que no
+  viene incluido. Ver [Salud de los discos](#salud-de-los-discos-smart).
+- **Desinstalar.** En Windows, desde *Agregar o quitar programas*. En Ubuntu,
+  `sudo apt remove analizador-disco`. El historial y el registro se conservan
+  en la carpeta de datos (`%LOCALAPPDATA%\analizador-disco` o
+  `~/.local/share/analizador-disco`); bórrala a mano si no los quieres.
+
+### Qué hace el programa con tus archivos y tus datos
+
+- **No envía datos a ningún servidor.** Todo el análisis se hace en tu equipo.
+  No hay cuentas, anuncios ni estadísticas de uso. La única conexión saliente
+  posible es el correo de alertas de salud, y solo si tú lo configuras.
+- **Por defecto solo lee.** Escanear, explorar y buscar basura no cambia nada.
+- **Nada se borra sin tu confirmación**, y borrar significa enviar a la
+  papelera. Antes verás la lista exacta y el espacio afectado.
+- **El modo simulación empieza activado**: la ventana de confirmación aparece
+  con "Solo simular" marcado. Se cambia en Configuración.
+- **Más de 1 GB pide confirmar dos veces.**
+- **Carpetas protegidas**: las del sistema, la carpeta personal, las de otros
+  usuarios y las carpetas Documentos, Escritorio e Imágenes no se pueden mover
+  ni borrar. Además, nada de lo que hay dentro de Documentos, Escritorio o
+  Imágenes se sugiere como basura (puedes actuar sobre esos archivos a mano,
+  con confirmación).
+- **Registro de acciones**: cada elemento movido o borrado queda anotado en
+  `registro.log`, en la carpeta de datos. Se abre desde Configuración.
+- **Permisos de administrador**: solo se piden, y explicando antes por qué,
+  para leer la salud de un disco que lo exija. El resto funciona sin ellos.
+- **Primera ejecución**: un asistente breve explica todo esto.
+- **Sin garantía**: el programa se ofrece tal cual. Revisa lo que marcas y ten
+  copia de seguridad de lo que te importa.
+
+## Uso desde el código fuente
+
+Las secciones siguientes son para quien prefiera ejecutar el programa con
+Python o quiera modificarlo.
+
 ## Requisitos
 
 - Python 3.10 o superior.
@@ -452,7 +565,14 @@ core/        Motor: escaneo, carpetas, árbol, tipos, consulta, duplicados, basu
 core/reglas/ Ubicaciones conocidas de Windows y de Linux
 cli/         Terminal (argparse)
 web/         Interfaz web (Flask, HTML, CSS y JavaScript; d3-hierarchy en static/vendor)
-utils/       Formato, detección del sistema, discos de red y carpetas protegidas
+utils/       Formato, detección del sistema, discos de red, carpetas protegidas,
+             nombre y versión
+build.py         Compila y crea instaladores y sumas SHA-256
+analizador-disco.spec   Receta de PyInstaller
+instalador/      Inno Setup (Windows) y entrada de menú (Linux)
+.github/workflows/      Compilación automática en Windows y Linux
+docs/            Capturas, guía de distribución y pruebas manuales
+herramientas/    Generador del icono
 tests/       Pruebas con pytest
 ```
 
@@ -479,3 +599,61 @@ $env:PROBAR_PAPELERA = "1"; python -m pytest tests/test_limpieza.py
 ```bash
 PROBAR_PAPELERA=1 python3 -m pytest tests/test_limpieza.py
 ```
+
+## Compilar e instaladores (desarrolladores)
+
+```
+pip install -r requirements-empaquetado.txt
+python build.py                # ejecutable + paquete portable + sumas SHA-256
+python build.py --instalador   # además, el instalador de este sistema
+```
+
+Los archivos quedan en `dist/entregables/`. Se compila para el sistema en el
+que se ejecuta: Windows en Windows y Linux en Linux.
+
+- **Windows**: `.zip` portable e instalador de Inno Setup (requiere
+  [Inno Setup 6](https://jrsoftware.org/isdl.php)).
+- **Linux**: `.tar.gz`, AppImage (requiere `appimagetool`) y `.deb`.
+- **GitHub Actions**: `.github/workflows/compilar.yml` hace todo lo anterior en
+  Windows y Linux, guarda los archivos como artefactos y, al subir una etiqueta
+  `v1.2.3`, publica la versión.
+- **Firma de código**: opcional y ya preparada en el flujo; se activa creando
+  unos secretos en GitHub.
+
+Todo el detalle (publicar una versión, activar la firma, licencias al
+distribuir) está en [docs/DISTRIBUCION.md](docs/DISTRIBUCION.md), y la lista
+de comprobaciones en equipos limpios en
+[docs/PRUEBAS_MANUALES.md](docs/PRUEBAS_MANUALES.md).
+
+### Un solo ejecutable para todo
+
+| Comando | Qué abre |
+|---|---|
+| `AnalizadorDisco` | Aplicación de escritorio, sin ventana de consola |
+| `AnalizadorDisco cli resumen` | Terminal (cualquier comando de `cli`) |
+| `AnalizadorDisco web` | Interfaz web local |
+| `AnalizadorDisco --version` | Versión |
+
+En Linux, con el `.deb` instalado, el comando es `analizador-disco`.
+
+**Nota para Windows.** El ejecutable no tiene consola, para que al abrir la
+aplicación no aparezca una ventana negra. Por eso, desde una terminal, Windows
+no espera a que termine y el texto puede mezclarse con el símbolo del sistema.
+Para que espere:
+
+```powershell
+.\AnalizadorDisco.exe cli resumen | Out-Host              # PowerShell
+start /wait AnalizadorDisco.exe cli limpiar -c cache      &rem CMD
+```
+
+Los comandos que preguntan algo (`limpiar` y `mover` sin `--dry-run`) deben
+lanzarse con `start /wait` desde CMD.
+
+## Licencia
+
+Este proyecto se publica bajo la [licencia MIT](LICENSE): puedes usarlo,
+modificarlo y redistribuirlo libremente, sin garantía.
+
+Las bibliotecas de terceros y sus licencias están en [NOTICE](NOTICE), y
+también se ven dentro del programa en *Acerca de > Licencias de terceros*.
+smartmontools no se incluye: es opcional y se instala aparte.

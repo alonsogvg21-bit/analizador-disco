@@ -16,11 +16,13 @@ from PySide6.QtWidgets import (
 
 from core.consulta import quitar_del_escaneo
 from core.historial import carpeta_de_datos
-from core.limpieza import limpiar
+from core.limpieza import limpiar, requiere_doble_confirmacion
 from core.modelos import CategoriaBasura, ElementoBasura, ResultadoEscaneo
 from core.mover import mover
 from desktop import estilos
 from desktop.acciones import MOVER, DialogoConfirmacion, menu_contextual
+from desktop.acerca import DialogoAcercaDe, icono
+from desktop.errores import mostrar_error
 from desktop.hilos import HiloEscaneo, HiloFuncion
 from desktop.vistas.basura import VistaBasura
 from desktop.vistas.configuracion import VistaConfiguracion
@@ -30,6 +32,7 @@ from desktop.vistas.historial import VistaHistorial
 from desktop.vistas.inicio import VistaInicio
 from desktop.vistas.salud import VistaSalud
 from utils.formato import tamano_legible
+from utils.info import NOMBRE, VERSION
 from utils.red import AVISO_RED, es_ruta_de_red
 
 SECCIONES = (
@@ -46,7 +49,8 @@ SECCIONES = (
 class VentanaPrincipal(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Analizador de disco")
+        self.setWindowTitle(NOMBRE)
+        self.setWindowIcon(icono())
         self.resize(1180, 760)
         self.setMinimumSize(880, 560)
 
@@ -91,11 +95,16 @@ class VentanaPrincipal(QMainWindow):
         self._cancelar = QPushButton("Cancelar")
         self._cancelar.clicked.connect(self.cancelar_escaneo)
         self._cancelar.hide()
+        acerca = QPushButton(f"Acerca de · v{VERSION}")
+        acerca.setObjectName("miga")
+        acerca.setToolTip("Nombre, versión y licencia del programa (F1)")
+        acerca.clicked.connect(self.acerca_de)
         barra = self.statusBar()
         barra.setSizeGripEnabled(False)
         barra.addWidget(self._mensaje, 1)
         barra.addPermanentWidget(self._progreso)
         barra.addPermanentWidget(self._cancelar)
+        barra.addPermanentWidget(acerca)
 
         self.lateral.setCurrentRow(0)
 
@@ -121,6 +130,10 @@ class VentanaPrincipal(QMainWindow):
             if hasattr(vista, "al_cambiar_tema"):
                 vista.al_cambiar_tema()
             vista.update()
+
+    def simular_por_defecto(self) -> bool:
+        """El modo simulación empieza activado; solo se desactiva desde Configuración."""
+        return str(self.ajustes.value("simular_por_defecto", "true")).lower() == "true"
 
     def buscar_duplicados_al_escanear(self) -> bool:
         return str(self.ajustes.value("duplicados", "true")).lower() == "true"
@@ -148,7 +161,7 @@ class VentanaPrincipal(QMainWindow):
         hilo.avance_duplicados.connect(self._en_duplicados)
         hilo.terminado.connect(self._escaneo_terminado)
         hilo.cancelado.connect(lambda: self._fin_escaneo("Escaneo cancelado."))
-        hilo.fallo.connect(lambda texto: self._fin_escaneo(f"No se pudo completar el escaneo: {texto}"))
+        hilo.fallo.connect(self._escaneo_fallido)
         self._hilo_escaneo = hilo
 
         self._progreso.setRange(0, 0)   # sin porcentaje: no se sabe cuántos archivos faltan
@@ -174,6 +187,10 @@ class VentanaPrincipal(QMainWindow):
             self.estado("Cancelando…")
             self._hilo_escaneo.cancelar()
 
+    def _escaneo_fallido(self, texto: str) -> None:
+        self._fin_escaneo("No se pudo completar el escaneo.")
+        mostrar_error(self, f"No se pudo completar el escaneo: {texto}")
+
     def _fin_escaneo(self, mensaje: str) -> None:
         self._progreso.hide()
         self._cancelar.hide()
@@ -198,7 +215,7 @@ class VentanaPrincipal(QMainWindow):
         """Ejecuta una función sin bloquear la ventana y entrega su resultado."""
         hilo = HiloFuncion(funcion, *argumentos, parent=self, **opciones)
         hilo.resultado.connect(al_terminar)
-        hilo.fallo.connect(al_fallar or (lambda problema: QMessageBox.warning(self, "Error", str(problema))))
+        hilo.fallo.connect(al_fallar or (lambda problema: mostrar_error(self, problema)))
         hilo.finished.connect(lambda: self._hilos.remove(hilo) if hilo in self._hilos else None)
         self._hilos.append(hilo)
         hilo.start()
@@ -215,10 +232,14 @@ class VentanaPrincipal(QMainWindow):
             QMessageBox.information(self, "Nada seleccionado",
                                     "No hay ningún elemento seleccionado que se pueda mover o borrar.")
             return
-        dialogo = DialogoConfirmacion(self, elementos, accion)
+        dialogo = DialogoConfirmacion(self, elementos, accion, simular=self.simular_por_defecto())
         if dialogo.exec() != DialogoConfirmacion.DialogCode.Accepted:
             return
         simulacion = dialogo.simulacion
+        if not simulacion and requiere_doble_confirmacion(elementos) and not self._segunda_confirmacion(
+                accion, elementos):
+            self.estado("Cancelado. No se hizo ningún cambio.")
+            return
         self.estado("Simulando…" if simulacion else "Trabajando…")
         if accion == MOVER:
             self.lanzar(mover, elementos, dialogo.destino, simulacion=simulacion,
@@ -227,9 +248,20 @@ class VentanaPrincipal(QMainWindow):
             self.lanzar(limpiar, elementos, simulacion=simulacion,
                         al_terminar=self._accion_terminada, al_fallar=self._accion_fallida)
 
+    def _segunda_confirmacion(self, accion: str, elementos: list[ElementoBasura]) -> bool:
+        """Más de 1 GB: se pregunta otra vez, y la respuesta predeterminada es No."""
+        total = tamano_legible(sum(e.tamano for e in elementos))
+        verbo = "mover" if accion == MOVER else "enviar a la papelera"
+        respuesta = QMessageBox.question(
+            self, "Confirma otra vez",
+            f"Vas a {verbo} {total}, más de 1 GB.\n\n¿Seguro que quieres continuar?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        return respuesta == QMessageBox.StandardButton.Yes
+
     def _accion_fallida(self, problema: Exception) -> None:
         self.estado("No se hizo ningún cambio.")
-        QMessageBox.warning(self, "No se pudo completar", str(problema))
+        mostrar_error(self, problema, "No se pudo completar")
 
     def _accion_terminada(self, hecho) -> None:
         movimiento = hasattr(hecho, "movidos")
@@ -280,8 +312,13 @@ class VentanaPrincipal(QMainWindow):
             hilo.wait(3000)
         evento.accept()
 
+    def acerca_de(self) -> None:
+        DialogoAcercaDe(self).exec()
+
     def keyPressEvent(self, evento) -> None:
-        if evento.key() == Qt.Key.Key_Escape and self.escaneando():
+        if evento.key() == Qt.Key.Key_F1:
+            self.acerca_de()
+        elif evento.key() == Qt.Key.Key_Escape and self.escaneando():
             self.cancelar_escaneo()
         else:
             super().keyPressEvent(evento)

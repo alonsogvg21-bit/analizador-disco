@@ -72,10 +72,16 @@ def nombre_de_tarea(ruta: str | os.PathLike) -> str:
     return f"{legible[:30] or 'raiz'}-{hashlib.sha1(texto.encode('utf-8')).hexdigest()[:8]}"
 
 
+def comando_del_programa() -> list[str]:
+    """Cómo se lanza este programa: 'python main.py' o, si está empaquetado, el propio ejecutable."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, str(Path(__file__).resolve().parent.parent / "main.py")]
+
+
 def comando_de_escaneo(ruta: str | os.PathLike) -> list[str]:
     """El comando que ejecutará la tarea."""
-    principal = Path(__file__).resolve().parent.parent / "main.py"
-    return [sys.executable, str(principal), "cli", "--silencioso", "guardar", str(ruta)]
+    return [*comando_del_programa(), "cli", "--silencioso", "guardar", str(ruta)]
 
 
 def _archivo_de_datos() -> Path:
@@ -260,8 +266,7 @@ RUTA_TAREA_SALUD = "(salud de todos los discos)"
 
 
 def comando_de_salud() -> list[str]:
-    principal = Path(__file__).resolve().parent.parent / "main.py"
-    return [sys.executable, str(principal), "cli", "salud", "revisar"]
+    return [*comando_del_programa(), "cli", "salud", "revisar"]
 
 
 def crear_tarea_salud(

@@ -18,7 +18,7 @@ from core.duplicados import buscar_duplicados
 from core.modelos import CategoriaBasura, ElementoBasura, ResultadoEscaneo
 from core.reglas import reglas_del_sistema
 from core.reglas.base import CACHE, DESCARGAS, LOGS, PAPELERA, TEMPORALES, ReglaUbicacion
-from utils.seguridad import es_ruta_protegida
+from utils.seguridad import carpetas_personales, en_carpeta_personal, es_ruta_protegida
 
 REGENERABLES = "regenerables"
 DUPLICADOS = "duplicados"
@@ -218,6 +218,7 @@ def detectar_basura(
     incluir_duplicados: bool = True,
     progreso: Callable[[int, int], None] | None = None,
     cancelar: threading.Event | None = None,
+    personales: Iterable[Path] | None = None,
 ) -> list[CategoriaBasura]:
     """Reúne todas las categorías de basura.
 
@@ -227,6 +228,8 @@ def detectar_basura(
       un escaneo, esas categorías quedan vacías.
     Un mismo archivo nunca aparece en dos categorías, para no contar dos veces
     el espacio que se liberaría.
+    Nada que esté dentro de Documentos, Escritorio o Imágenes se sugiere como
+    basura ('personales' permite indicar otras carpetas en las pruebas).
     """
     reglas = list(reglas_del_sistema() if reglas is None else reglas)
     categorias = {
@@ -243,12 +246,15 @@ def detectar_basura(
         # interesa encontrar duplicados y archivos antiguos.
         ubicaciones = [os.path.normcase(str(r.ruta)) for r in reglas if r.limpiable]
         vistos: set[str] = set()
+        protegidas = list(carpetas_personales() if personales is None else personales)
 
         def agregar(clave: str, elementos: list[ElementoBasura]) -> None:
             for elemento in elementos:
                 texto = os.path.normcase(str(elemento.ruta))
                 if texto in vistos or _dentro_de_alguna(elemento.ruta, ubicaciones):
                     continue
+                if protegidas and en_carpeta_personal(elemento.ruta, protegidas):
+                    continue  # archivos personales: nunca se sugieren como basura
                 vistos.add(texto)
                 categorias[clave].elementos.append(elemento)
 

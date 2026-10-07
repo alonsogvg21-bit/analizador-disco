@@ -414,7 +414,7 @@ function abrirDialogo(nuevaAccion) {
   $("#nota-mover").hidden = !mover;
   $("#nota-papelera").hidden = mover;
   $("#dialogo-error").hidden = true;
-  $("#solo-simular").checked = false;
+  $("#solo-simular").checked = true;   // por seguridad, se empieza siempre simulando
   pintarBotonConfirmar();
   $("#dialogo").showModal();
   // El foco nunca empieza en la acción peligrosa.
@@ -438,6 +438,13 @@ $("#dialogo-confirmar").addEventListener("click", async () => {
   const simulacion = $("#solo-simular").checked;
   const boton = $("#dialogo-confirmar");
   const cuerpo = { ids: [...seleccion.keys()], simulacion, confirmado: !simulacion };
+  // Más de 1 GB: se pregunta una segunda vez antes de tocar nada.
+  if (!simulacion && totalSeleccionado() > 1024 ** 3) {
+    const seguro = window.confirm(
+      `Son ${tamanoLegible(totalSeleccionado())}, más de 1 GB.\n\n¿Seguro que quieres continuar?`);
+    if (!seguro) return;
+    cuerpo.confirmado_doble = true;
+  }
   if (accion === "mover") cuerpo.destino = $("#destino").value;
   boton.disabled = true;
   boton.textContent = "Trabajando…";

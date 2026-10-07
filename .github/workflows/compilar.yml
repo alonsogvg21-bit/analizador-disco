@@ -1,0 +1,125 @@
+# Compila el programa en Windows y Linux, crea los instaladores y los guarda
+# como artefactos. Al publicar una etiqueta "v1.2.3" crea además la versión
+# (release) en GitHub con todos los archivos.
+#
+# La firma de código es OPCIONAL: los pasos de firma solo se ejecutan si los
+# secretos correspondientes existen. Cómo activarla: docs/DISTRIBUCION.md
+name: Compilar
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:   # permite lanzarlo a mano desde la pestaña Actions
+
+permissions:
+  contents: read
+
+jobs:
+  compilar:
+    name: ${{ matrix.nombre }}
+    runs-on: ${{ matrix.sistema }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nombre: Windows
+            sistema: windows-latest
+          - nombre: Linux
+            # Se usa una versión antigua de Ubuntu a propósito: lo compilado aquí
+            # funciona en sistemas más nuevos, pero no al revés.
+            sistema: ubuntu-22.04
+    env:
+      QT_QPA_PLATFORM: offscreen      # las pruebas de la interfaz no necesitan pantalla
+      PYTHONIOENCODING: utf-8
+      # Los secretos no se pueden consultar en un "if"; se pasan a variables.
+      CERTIFICADO_WINDOWS: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+      CLAVE_GPG: ${{ secrets.GPG_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Bibliotecas del sistema (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
+            libxcb-shape0 libxcb-xinerama0 libfontconfig1 libdbus-1-3 file
+          curl -sSfL -o "$RUNNER_TEMP/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          echo "APPIMAGETOOL=$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
+
+      - name: Dependencias de Python
+        run: python -m pip install -r requirements-empaquetado.txt
+
+      - name: Pruebas
+        run: python -m pytest -q
+
+      # ---------- Firma en Windows (opcional) ----------
+      - name: Preparar el certificado (solo si hay secretos)
+        if: runner.os == 'Windows' && env.CERTIFICADO_WINDOWS != ''
+        shell: pwsh
+        run: |
+          $ruta = Join-Path $env:RUNNER_TEMP "certificado.pfx"
+          [IO.File]::WriteAllBytes($ruta, [Convert]::FromBase64String($env:CERTIFICADO_WINDOWS))
+          "FIRMA_PFX=$ruta" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # signtool viene con el SDK de Windows, pero no está en el PATH.
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          $signtool.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Compilar y crear los instaladores
+        env:
+          FIRMA_CLAVE: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: python build.py --instalador
+
+      - name: Comprobar que el ejecutable arranca
+        shell: bash
+        run: |
+          ./dist/AnalizadorDisco/AnalizadorDisco --version
+          ./dist/AnalizadorDisco/AnalizadorDisco cli resumen
+
+      - name: Borrar el certificado
+        if: always() && runner.os == 'Windows' && env.FIRMA_PFX != ''
+        shell: pwsh
+        run: Remove-Item $env:FIRMA_PFX -Force -ErrorAction SilentlyContinue
+
+      # ---------- Firma en Linux (opcional) ----------
+      - name: Firmar las sumas con GPG (solo si hay secretos)
+        if: runner.os == 'Linux' && env.CLAVE_GPG != ''
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$CLAVE_GPG" | gpg --batch --import
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+            --armor --detach-sign dist/entregables/SHA256SUMS-linux.txt
+
+      - name: Guardar los entregables
+        uses: actions/upload-artifact@v4
+        with:
+          name: analizador-disco-${{ matrix.nombre }}
+          path: dist/entregables/
+          if-no-files-found: error
+
+  publicar:
+    name: Publicar la versión
+    needs: compilar
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # necesario para crear la versión
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: entregables
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: entregables/*
+          generate_release_notes: true

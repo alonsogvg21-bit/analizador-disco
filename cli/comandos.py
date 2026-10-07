@@ -17,7 +17,7 @@ from pathlib import Path
 
 from core.basura import ANTIGUOS, DUPLICADOS, MB, REGENERABLES, detectar_basura
 from core.historial import comparar, escaneo_cercano, guardar_escaneo, listar_escaneos
-from core.limpieza import ResultadoLimpieza, limpiar
+from core.limpieza import ResultadoLimpieza, limpiar, requiere_doble_confirmacion
 from core.modelos import ElementoBasura
 from core.mover import ResultadoMovimiento, mover, validar_destino
 from utils.seguridad import es_ruta_protegida
@@ -42,6 +42,7 @@ from core.reporte import exportar_csv, exportar_html, reunir_datos
 from core.reporte_pdf import exportar_pdf
 from utils.red import AVISO_RED, es_ruta_de_red
 from core.tipos import TIPOS, clasificar, resumen_por_tipo
+from utils.info import NOMBRE, VERSION
 from utils.formato import diferencia_en_mb, fecha_legible, porcentaje, tamano_legible
 
 ANCHO_BARRA = 24
@@ -53,6 +54,7 @@ CATEGORIAS_LIMPIABLES = (TEMPORALES, CACHE, REGENERABLES, DUPLICADOS, ANTIGUOS)
 CATEGORIAS_CON_RUTA = {REGENERABLES, DUPLICADOS, ANTIGUOS}
 PALABRA_CONFIRMACION = "ELIMINAR"
 PALABRA_MOVER = "MOVER"
+PALABRA_SEGUNDA = "CONFIRMO"
 
 
 # ---------------------------------------------------------------- ayudas de salida
@@ -404,6 +406,10 @@ def cmd_salud(args: argparse.Namespace) -> int:
         if accion == "prueba":
             print(iniciar_autoprueba(args.disco, args.tipo))
             return 0
+        if accion == "volcar":
+            from core.elevacion import volcar_salud
+            print(f"Datos de {volcar_salud(args.archivo)} discos guardados.")
+            return 0
 
         config = leer_config()
         discos = leer_todos(umbrales=config.umbrales())
@@ -421,7 +427,7 @@ def cmd_salud(args: argparse.Namespace) -> int:
                 print(f"  {alerta.titulo}. {alerta.texto}")
             for fallo in revision.fallos_de_envio:
                 print(f"  Aviso: {fallo}", file=sys.stderr)
-    except (ErrorSalud, ErrorProgramador) as problema:
+    except (ErrorSalud, ErrorProgramador, OSError) as problema:
         print(f"\n{problema}", file=sys.stderr)
         return 1
     return 0
@@ -571,7 +577,7 @@ def cmd_limpiar(args: argparse.Namespace) -> int:
         respuesta = input(f'Escribe "{PALABRA_CONFIRMACION}" para continuar: ')
     except EOFError:
         respuesta = ""
-    if respuesta.strip() != PALABRA_CONFIRMACION:
+    if respuesta.strip() != PALABRA_CONFIRMACION or not _segunda_confirmacion(elegidos):
         print("No se confirmó. No se ha tocado nada.")
         return 1
 
@@ -582,6 +588,19 @@ def cmd_limpiar(args: argparse.Namespace) -> int:
           f"Espacio liberado: {tamano_legible(hecho.bytes_liberados)}.")
     print("El espacio no vuelve al disco hasta que vacíes la papelera.")
     return 0
+
+
+def _segunda_confirmacion(elegidos: list[ElementoBasura]) -> bool:
+    """Por encima de 1 GB se pregunta otra vez, con otra palabra, para evitar despistes."""
+    if not requiere_doble_confirmacion(elegidos):
+        return True
+    total = tamano_legible(sum(e.tamano for e in elegidos))
+    print(f"\nAtención: son {total}, más de 1 GB.")
+    try:
+        respuesta = input(f'Escribe "{PALABRA_SEGUNDA}" para confirmar de nuevo: ')
+    except EOFError:
+        respuesta = ""
+    return respuesta.strip() == PALABRA_SEGUNDA
 
 
 def _basura_elegida(args: argparse.Namespace, resultado: ResultadoEscaneo | None,
@@ -665,7 +684,7 @@ def cmd_mover(args: argparse.Namespace) -> int:
             respuesta = input(f'\nEscribe "{PALABRA_MOVER}" para continuar: ')
         except EOFError:
             respuesta = ""
-        if respuesta.strip() != PALABRA_MOVER:
+        if respuesta.strip() != PALABRA_MOVER or not _segunda_confirmacion(elegidos):
             print("No se confirmó. No se ha tocado nada.")
             return 1
         hecho = mover(elegidos, destino, simulacion=False)
@@ -736,6 +755,7 @@ def crear_parser() -> argparse.ArgumentParser:
                     "Todos los comandos son de solo lectura salvo 'limpiar' y 'mover', "
                     "que siempre muestran la lista y piden confirmación.",
     )
+    parser.add_argument("--version", action="version", version=f"{NOMBRE} {VERSION}")
     parser.add_argument("--silencioso", action="store_true",
                         help="no mostrar la línea de progreso")
     comandos = parser.add_subparsers(dest="comando", required=True, metavar="comando")
@@ -828,6 +848,9 @@ def crear_parser() -> argparse.ArgumentParser:
     prueba.add_argument("--tipo", choices=tuple(TIPOS_DE_PRUEBA), default="corta",
                         help="corta (unos 2 minutos, por defecto) o larga (puede tardar horas)")
     acciones.add_parser("revisar", help="mostrar el estado y avisar si algo ha empeorado")
+    volcar = acciones.add_parser(
+        "volcar", help="(uso interno) guardar los datos de smartctl en un archivo nuevo")
+    volcar.add_argument("archivo", metavar="ARCHIVO")
     alertas = acciones.add_parser("alertas", help="ver o cambiar la configuración de las alertas")
     alertas.add_argument("--temperatura", type=_temperatura, default=_SIN_CAMBIO, metavar="GRADOS",
                          help="límite de temperatura en °C, o 'auto'")
