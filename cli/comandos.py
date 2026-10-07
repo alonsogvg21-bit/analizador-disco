@@ -39,7 +39,7 @@ from core.privilegios import (
     PermisoCancelado, iniciar_autoprueba_con_permiso, leer_salud_con_permiso,
 )
 from core.salud import (
-    FALTA_PERMISO, NOMBRES_ESTADO, TIPOS_DE_PRUEBA, ErrorSalud, FaltaPermiso, SaludDisco,
+    NOMBRES_ESTADO, TIPOS_DE_PRUEBA, ErrorSalud, FaltaPermiso, SaludDisco,
     iniciar_autoprueba, instrucciones_de_permisos, leer_todos,
 )
 from core.reporte import exportar_csv, exportar_html, reunir_datos
@@ -417,8 +417,8 @@ def cmd_salud(args: argparse.Namespace) -> int:
             try:
                 print(iniciar_autoprueba_con_permiso(args.disco, args.tipo) if elevar
                       else iniciar_autoprueba(args.disco, args.tipo))
-            except FaltaPermiso:
-                print(f"{FALTA_PERMISO}\n{instrucciones_de_permisos()} prueba {args.disco}", file=sys.stderr)
+            except FaltaPermiso as problema:
+                print(f"{problema}\n{instrucciones_de_permisos()} prueba {args.disco}", file=sys.stderr)
                 return 1
             return 0
 

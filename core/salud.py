@@ -134,6 +134,8 @@ def instrucciones_de_instalacion(sistema: str | None = None) -> str:
 
 
 FALTA_PERMISO = "Para leer la salud de este disco el sistema exige permisos de administrador."
+FALTA_PERMISO_PRUEBA = ("Para lanzar una autoprueba en este disco el sistema exige permisos "
+                        "de administrador.")
 
 
 def instrucciones_de_permisos(sistema: str | None = None) -> str:
@@ -491,7 +493,9 @@ def mandar_autoprueba(nombre: str, tipo_dispositivo: str, tipo: str, ejecutar: E
 
     codigo = datos.get("smartctl", {}).get("exit_status", 0)
     if _sin_permisos(datos):
-        raise FaltaPermiso(FALTA_PERMISO)
+        # Ocurre incluso en discos cuya lectura normal no pide permisos: mandar
+        # una orden al disco es una operación más restringida que leerlo.
+        raise FaltaPermiso(FALTA_PERMISO_PRUEBA)
     if codigo != 0:
         raise ErrorSalud("El disco no pudo iniciar la autoprueba: "
                          + (_mensajes(datos) or f"código {codigo}") + ".")
