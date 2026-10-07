@@ -44,6 +44,18 @@ analisis = Analysis(
     excludes=EXCLUIDOS,
     noarchive=False,
 )
+
+# Windows 10 y 11 ya traen el "Universal C Runtime" (ucrtbase.dll y las
+# api-ms-win-*.dll). PyInstaller las copia del equipo donde se compila, pero no
+# hacen falta, y un instalador que suelta bibliotecas con nombre de sistema
+# hace desconfiar a los antivirus (alguno llega a bloquear la instalación).
+if sys.platform == "win32":
+    def _es_del_sistema(nombre: str) -> bool:
+        nombre = Path(nombre).name.lower()
+        return nombre == "ucrtbase.dll" or nombre.startswith("api-ms-win-")
+
+    analisis.binaries = [b for b in analisis.binaries if not _es_del_sistema(b[0])]
+
 paquete = PYZ(analisis.pure)
 
 # build.py genera este archivo con la versión; solo existe y se usa en Windows.
