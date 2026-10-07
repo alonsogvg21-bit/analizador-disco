@@ -1,0 +1,38 @@
+{
+  "json_format_version": [
+    1,
+    0
+  ],
+  "smartctl": {
+    "version": [
+      7,
+      4
+    ],
+    "svn_revision": "5530",
+    "platform_info": "x86_64-linux-6.8.0",
+    "argv": [
+      "smartctl",
+      "--json",
+      "-a",
+      "/dev/sdc"
+    ],
+    "exit_status": 4,
+    "messages": [
+      {
+        "string": "/dev/sdc: Unknown USB bridge [0x090c:0x1000 (0x1100)]",
+        "severity": "error"
+      }
+    ]
+  },
+  "device": {
+    "name": "/dev/sdc",
+    "info_name": "/dev/sdc",
+    "type": "scsi",
+    "protocol": "SCSI"
+  },
+  "model_name": "General USB Flash Disk",
+  "user_capacity": {
+    "blocks": 62521344,
+    "bytes": 32010928128
+  }
+}

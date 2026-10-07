@@ -1,0 +1,38 @@
+{
+  "json_format_version": [
+    1,
+    0
+  ],
+  "smartctl": {
+    "version": [
+      7,
+      4
+    ],
+    "svn_revision": "5530",
+    "platform_info": "x86_64-linux-6.8.0",
+    "argv": [
+      "smartctl",
+      "--json",
+      "-t",
+      "short",
+      "-d",
+      "ata",
+      "/dev/sda"
+    ],
+    "exit_status": 0
+  },
+  "device": {
+    "name": "/dev/sda",
+    "info_name": "/dev/sda [SAT]",
+    "type": "sat",
+    "protocol": "ATA"
+  },
+  "ata_smart_data": {
+    "self_test": {
+      "polling_minutes": {
+        "short": 2,
+        "extended": 109
+      }
+    }
+  }
+}

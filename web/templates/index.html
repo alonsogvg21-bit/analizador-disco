@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="token" content="{{ token }}">
+  <title>Analizador de disco</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='estilo.css') }}">
+  <script>
+    // Se aplica antes de pintar la página para que no parpadee al cargar.
+    try {
+      const guardado = localStorage.getItem("tema");
+      if (guardado) document.documentElement.dataset.tema = guardado;
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <header class="cabecera">
+    <div>
+      <h1>Analizador de disco</h1>
+      <p class="suave">Mira qué ocupa espacio y encuentra archivos que ya no necesitas.</p>
+    </div>
+    <button id="btn-tema" class="boton secundario" type="button">Modo oscuro</button>
+  </header>
+
+  <main>
+    <section aria-labelledby="titulo-discos">
+      <h2 id="titulo-discos">Tus discos</h2>
+      <div id="discos" class="rejilla-discos"></div>
+    </section>
+
+    <section aria-labelledby="titulo-salud">
+      <div class="salud-titulo">
+        <div>
+          <h2 id="titulo-salud">Salud de los discos</h2>
+          <p class="suave">Lo que cada disco informa sobre sí mismo (SMART). Solo se lee: no se escribe nada en ellos.</p>
+        </div>
+        <button id="btn-salud" class="boton secundario" type="button">Actualizar</button>
+      </div>
+      <p id="salud-nota" class="nota-red" role="status" hidden></p>
+      <div id="salud" class="rejilla-salud"></div>
+    </section>
+
+    <section class="tarjeta" aria-labelledby="titulo-escaneo">
+      <h2 id="titulo-escaneo">Analizar una carpeta</h2>
+      <p class="suave">Elige qué quieres revisar. El análisis solo lee: no borra ni cambia nada.</p>
+
+      <div id="sugerencias" class="chips"></div>
+      <label class="campo">
+        <span>Carpeta</span>
+        <input id="ruta" type="text" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="casilla">
+        <input id="con-duplicados" type="checkbox" checked>
+        <span>Buscar archivos duplicados <span class="suave">(más completo, pero tarda más)</span></span>
+      </label>
+
+      <button id="btn-escanear" class="boton principal grande" type="button">Escanear</button>
+      <p id="aviso" class="aviso" role="alert" hidden></p>
+
+      <div id="progreso" hidden>
+        <div class="barra-progreso"><span id="progreso-relleno"></span></div>
+        <p id="progreso-texto" class="progreso-texto" aria-live="polite"></p>
+        <p id="progreso-carpeta" class="suave ruta"></p>
+        <p id="progreso-aviso" class="nota-red" hidden></p>
+        <button id="btn-cancelar" class="boton secundario" type="button">Cancelar</button>
+      </div>
+    </section>
+
+    <section id="resultados" hidden>
+      <div class="resumen">
+        <div>
+          <h2>Resultado</h2>
+          <p id="resumen-texto"></p>
+          <p id="resumen-notas" class="suave"></p>
+        </div>
+        <div class="exportar">
+          <a class="boton secundario" href="/api/reporte?formato=html">Descargar reporte HTML</a>
+          <a class="boton secundario" href="/api/reporte?formato=csv">Descargar reporte CSV</a>
+          <a class="boton secundario" href="/api/reporte?formato=pdf">Descargar reporte PDF</a>
+        </div>
+      </div>
+
+      <div id="resultado-accion" class="tarjeta" role="status" hidden></div>
+
+      <div class="pestanas" role="tablist">
+        <button role="tab" data-panel="panel-espacio" aria-selected="true">Qué ocupa espacio</button>
+        <button role="tab" data-panel="panel-mapa" aria-selected="false">Mapa de bloques</button>
+        <button role="tab" data-panel="panel-top" aria-selected="false">Archivos</button>
+        <button role="tab" data-panel="panel-basura" aria-selected="false">Archivos basura</button>
+        <button role="tab" data-panel="panel-historial" aria-selected="false">Historial</button>
+      </div>
+
+      <div id="panel-espacio" role="tabpanel" class="dos-columnas">
+        <div class="tarjeta">
+          <h3>Tipos de archivo</h3>
+          <p class="suave">Cuánto espacio usa cada clase de archivo.</p>
+          <div id="tipos"></div>
+        </div>
+        <div class="tarjeta">
+          <h3>Carpetas</h3>
+          <p class="suave">Ordenadas de mayor a menor. Pulsa una carpeta para ver qué hay dentro.</p>
+          <div id="arbol"></div>
+        </div>
+      </div>
+
+      <div id="panel-mapa" role="tabpanel" class="tarjeta" hidden>
+        <h3>Mapa de bloques</h3>
+        <p class="suave">Cada bloque es una carpeta o un archivo: cuanto más grande el bloque, más espacio ocupa.
+          Pulsa una carpeta para entrar en ella y usa la ruta de arriba para volver.</p>
+        <nav id="mapa-migas" class="migas" aria-label="Ruta de navegación del mapa"></nav>
+        <div id="mapa" class="mapa"></div>
+        <div id="mapa-leyenda" class="leyenda" aria-label="Colores por tipo de archivo"></div>
+        <p class="suave">El color de una carpeta es el del tipo de archivo que más espacio ocupa dentro de ella.</p>
+      </div>
+      <div id="mapa-info" class="mapa-info" role="tooltip" hidden></div>
+
+      <div id="panel-top" role="tabpanel" class="tarjeta" hidden>
+        <h3>Archivos</h3>
+        <p class="suave">Pulsa el título de una columna para ordenar por ella; púlsalo otra vez para invertir
+          el orden. Marca archivos para moverlos o enviarlos a la papelera.</p>
+        <div class="filtros">
+          <label>Tipo
+            <select id="filtro-tipo"><option value="">Todos</option></select>
+          </label>
+          <label>Tamaño mínimo (MB)
+            <input id="filtro-min" type="number" min="0" step="1" value="0" inputmode="decimal">
+          </label>
+          <label>Mostrar
+            <select id="filtro-limite">
+              <option value="50">50 archivos</option>
+              <option value="100">100 archivos</option>
+              <option value="200">200 archivos</option>
+              <option value="500">500 archivos</option>
+            </select>
+          </label>
+        </div>
+        <p id="archivos-aviso" class="suave" hidden></p>
+        <div class="tabla-desplazable">
+          <table id="tabla-archivos">
+            <thead><tr>
+              <th><input id="archivos-todos" type="checkbox" aria-label="Seleccionar todos los archivos de la tabla"></th>
+              <th>#</th><th>Archivo</th><th>Tipo</th>
+              <th class="num"><button class="orden" type="button" data-orden="tamano">Tamaño</button></th>
+              <th class="num"><button class="orden" type="button" data-orden="modificado">Modificado</button></th>
+              <th class="num"><button class="orden" type="button" data-orden="accedido">Último acceso</button></th>
+            </tr></thead>
+            <tbody id="archivos"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="panel-basura" role="tabpanel" hidden>
+        <p class="suave">Marca lo que quieras quitar. No se borra nada hasta que lo confirmes,
+          y todo iría a la papelera, de donde se puede recuperar.</p>
+        <div id="basura"></div>
+      </div>
+
+      <div id="panel-historial" role="tabpanel" hidden>
+        <div class="tarjeta">
+          <h3>Uso a lo largo del tiempo</h3>
+          <p class="suave">Espacio que ocupaba esta carpeta en cada escaneo guardado. Cada escaneo que termina
+            se guarda solo. Pasa el ratón por un punto para ver el detalle.</p>
+          <div id="grafica-uso" class="grafica"></div>
+          <p id="grafica-nota" class="suave" hidden></p>
+        </div>
+
+        <div class="tarjeta">
+          <h3>Comparar dos fechas</h3>
+          <p class="suave">Elige dos escaneos para ver qué carpetas crecieron o disminuyeron entre uno y otro.</p>
+          <div class="filtros">
+            <label>Antes <select id="comparar-antes"></select></label>
+            <label>Después <select id="comparar-despues"></select></label>
+          </div>
+          <p id="comparar-resumen"></p>
+          <div class="tabla-desplazable">
+            <table id="tabla-cambios" hidden>
+              <thead><tr><th>Carpeta</th><th class="num">Antes</th><th class="num">Después</th><th class="num">Cambio</th></tr></thead>
+              <tbody id="cambios"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="tarjeta">
+          <h3>Escaneos programados</h3>
+          <p class="suave">El propio sistema (Programador de tareas en Windows, cron en Linux) escaneará la carpeta
+            y guardará el resultado aquí, aunque esta página esté cerrada. El equipo debe estar encendido.</p>
+          <div class="filtros">
+            <label>Frecuencia
+              <select id="programar-frecuencia">
+                <option value="diaria">Cada día</option>
+                <option value="semanal">Cada lunes</option>
+              </select>
+            </label>
+            <label>Hora <input id="programar-hora" type="time" value="09:00"></label>
+            <button id="btn-programar" class="boton principal" type="button">Programar esta carpeta</button>
+          </div>
+          <p id="programar-aviso" class="aviso" role="alert" hidden></p>
+          <ul id="programados" class="lista-programados"></ul>
+        </div>
+      </div>
+
+      <!-- La selección es común a las pestañas "Archivos" y "Archivos basura". -->
+      <div class="barra-seleccion">
+        <p id="contador">Nada seleccionado.</p>
+        <button id="btn-mover" class="boton secundario" type="button" disabled>Mover a otra carpeta…</button>
+        <button id="btn-limpiar" class="boton principal" type="button" disabled>Enviar a la papelera…</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Ventana de confirmación: nada se mueve ni se envía a la papelera sin pasar por aquí. -->
+  <dialog id="dialogo" aria-labelledby="dialogo-titulo">
+    <h2 id="dialogo-titulo">¿Enviar a la papelera?</h2>
+    <p id="dialogo-resumen"></p>
+    <ul id="dialogo-lista" class="lista-confirmacion"></ul>
+    <label id="campo-destino" class="campo">
+      <span>Carpeta de destino</span>
+      <input id="destino" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Por ejemplo E:\Videos o /media/disco/videos">
+    </label>
+    <p id="nota-papelera" class="suave">Los archivos van a la papelera y se pueden recuperar desde ahí.
+      El espacio no vuelve al disco hasta que la vacíes.</p>
+    <p id="nota-mover" class="suave">La carpeta de destino debe existir. Si allí ya hay algo con el mismo
+      nombre no se sobrescribe: se guarda como «nombre (1)».</p>
+    <p id="dialogo-error" class="aviso" role="alert" hidden></p>
+    <label class="casilla">
+      <input id="solo-simular" type="checkbox">
+      <span>Solo simular <span class="suave">(muestra qué pasaría sin tocar nada)</span></span>
+    </label>
+    <div class="dialogo-botones">
+      <button id="dialogo-cancelar" class="boton secundario" type="button">Cancelar</button>
+      <button id="dialogo-confirmar" class="boton peligro" type="button">Sí, enviar a la papelera</button>
+    </div>
+  </dialog>
+
+  <!-- Biblioteca guardada en local: la página funciona sin internet. -->
+  <script src="{{ url_for('static', filename='vendor/d3-hierarchy.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='mapa.js') }}"></script>
+  <script src="{{ url_for('static', filename='historial.js') }}"></script>
+  <script src="{{ url_for('static', filename='salud.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
