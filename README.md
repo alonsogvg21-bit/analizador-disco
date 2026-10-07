@@ -416,17 +416,41 @@ sí mismo y nunca escribe datos en él.
    - Windows: `winget install smartmontools.smartmontools` y volver a abrir la terminal.
    - Debian / Ubuntu: `sudo apt install smartmontools`
    - Fedora: `sudo dnf install smartmontools` · Arch: `sudo pacman -S smartmontools`
-2. Ejecutar con **permisos de administrador**, que es lo que exige el sistema
-   para hablar directamente con el disco:
-   - Windows: abre PowerShell con clic derecho > *Ejecutar como administrador*.
-   - Linux: antepón `sudo` (`sudo python3 main.py cli salud`).
+No hace falta abrir el programa como administrador. Algunos discos se leen
+sin permisos; para los que el sistema solo deja leer a un administrador, el
+programa los pide **en el momento, y solo si tú quieres**:
 
-Si falta `smartctl` o los permisos, el programa lo dice y muestra estos pasos.
+- **Escritorio y web**: la tarjeta del disco muestra lo que no necesita
+  permisos (modelo, capacidad, tipo) y el botón **Dar permiso y leer salud**.
+  Al pulsarlo, Windows muestra el aviso de Control de cuentas de usuario, o
+  Linux pide la contraseña. Una sola petición lee todos los discos.
+- **Terminal**: añade `--elevar` (`salud --elevar`). En Linux también vale `sudo`.
+- Si cancelas, no pasa nada: el botón sigue ahí y el resto funciona igual.
+
+Si falta `smartctl`, el programa lo dice y muestra cómo instalarlo.
+
+#### Cómo se piden los permisos
+
+La aplicación corre siempre como usuario normal. Lo único que se ejecuta con
+privilegios es un pequeño **ayudante** (`main.py --helper`, o el ejecutable
+con `--helper`), que:
+
+- solo acepta cuatro acciones: `listar-discos`, `leer-smart`,
+  `iniciar-autoprueba` y `resultado-autoprueba`;
+- solo admite nombres de disco con una forma estricta y que además detecte
+  `smartctl --scan`; no recibe comandos ni rutas;
+- solo lee, y solo imprime JSON.
+
+En Windows se lanza con el aviso de UAC. En Linux, con `pkexec` y una política
+de polkit propia, que el paquete `.deb` instala junto con el ayudante en
+`/usr/lib/analizador-disco/`. Sin agente gráfico de polkit, el programa indica
+el comando `sudo` equivalente.
 
 ### Uso
 
 ```
 python main.py cli salud                         # estado de todos los discos
+python main.py cli salud --elevar                # pidiendo permisos para los que lo exigen
 python main.py cli salud prueba /dev/sda         # autoprueba corta (unos 2 minutos)
 python main.py cli salud prueba /dev/sda --tipo larga
 python main.py cli salud revisar                 # estado + alertas si algo empeoró
@@ -450,7 +474,7 @@ programa ejecuta `smartctl --json -a DISCO` y traduce la respuesta.
 | Modelo, firmware, interfaz | Identificación del disco y cómo está conectado (SATA, NVMe) | Informativo |
 | Temperatura | Grados del disco ahora mismo | Lo normal es 25–50 °C; los NVMe trabajan más calientes |
 | Horas de uso | Tiempo total encendido | Informativo: muchas horas no implican fallo |
-| Ciclos de encendido | Veces que se ha encendido | Informativo |
+| Ciclos de encendido | Veces que se ha encendido | Informativo. Algunos SSD cuentan también cada entrada en reposo y dan cifras enormes; el programa lo avisa |
 | Sectores reasignados | Zonas dañadas que el disco sustituyó por otras de reserva | Debe ser 0. Si crece, el disco se está degradando |
 | Sectores pendientes | Zonas dudosas que aún no se han podido sustituir | Debe ser 0. Es la señal más temprana de fallo |
 | Sectores incorregibles | Zonas que no se pudieron leer ni corregir | Debe ser 0. Puede haber datos perdidos |

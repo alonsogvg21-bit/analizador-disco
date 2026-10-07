@@ -259,6 +259,20 @@ def paquete_deb() -> Path:
         "Recommends: smartmontools, policykit-1 | polkitd\n"
         f"Description: {NOMBRE}\n {DESCRIPCION}\n Por defecto solo lee; nada se borra sin confirmación.\n",
         encoding="utf-8", newline="\n")
+    # Permisos fijos, sin depender de cómo estuvieran los archivos de origen.
+    # Nada puede ser modificable por usuarios normales: el ayudante y la
+    # política de polkit se ejecutan o se leen con privilegios.
+    for ruta in carpeta.rglob("*"):
+        if ruta.is_symlink():
+            continue
+        if ruta.is_dir():
+            ruta.chmod(0o755)
+        elif (carpeta / "usr" / "share") in ruta.parents or ruta.parent.name == "DEBIAN":
+            ruta.chmod(0o644)           # datos: política, icono, entrada de menú, licencias
+        else:
+            ejecutable = ruta.stat().st_mode & stat.S_IXUSR
+            ruta.chmod(0o755 if ejecutable else 0o644)
+
     destino = ENTREGABLES / f"{PAQUETE_LINUX}_{VERSION}_{arquitectura}.deb"
     ejecutar(["dpkg-deb", "--build", "--root-owner-group", carpeta, destino])
     return destino

@@ -87,15 +87,48 @@ detalle técnico desde la ventana de error y el contenido de `registro.log`.
 - [ ] Un archivo abierto en otro programa se omite y se avisa; el resto se procesa.
 - [ ] Configuración > "Abrir el registro de acciones" muestra una línea por cada elemento movido o borrado.
 
-## 6. Salud del disco
+## 6. Salud del disco y permisos
+
+**En todos los sistemas**
 
 - [ ] Sin smartmontools instalado, explica cómo instalarlo.
-- [ ] Con smartmontools, los discos que no necesitan permisos se muestran con su semáforo.
-- [ ] Si un disco exige permisos, aparece "Leer con permisos de administrador…".
-- [ ] Al pulsarlo, **primero** se explica para qué son; cancelar ahí no pide nada.
-- [ ] Al continuar, Windows muestra el aviso de Control de cuentas (Linux pide la contraseña) y después aparecen los datos.
-- [ ] Rechazar el aviso del sistema muestra un mensaje claro y el programa sigue funcionando.
+- [ ] Abrir la aplicación y entrar en "Salud del disco" **no** pide permisos ni contraseña.
+- [ ] Los discos que no exigen permisos se muestran con su semáforo.
+- [ ] Un disco que los exige muestra modelo, capacidad y tipo, un texto corto y el botón "Dar permiso y leer salud".
+- [ ] En ningún sitio se pide cerrar el programa ni abrir PowerShell o una terminal.
 - [ ] El resto del programa nunca pide permisos de administrador.
+
+**Windows con cuenta de administrador**
+
+- [ ] Pulsar el botón muestra el aviso de Control de cuentas de usuario (UAC), una sola vez.
+- [ ] Aceptar: aparecen los datos de **todos** los discos.
+- [ ] Cancelar ("No"): mensaje tranquilo, sin ventana de error, y el botón sigue disponible.
+- [ ] Tras aceptar, "Prueba corta" vuelve a pedir permiso y la inicia.
+
+**Windows con cuenta de usuario estándar** (la que usa la mayoría en equipos de empresa o familiares)
+
+- [ ] Pulsar el botón pide el usuario y la contraseña de un administrador.
+- [ ] Introducirlos: aparecen los datos de todos los discos.
+- [ ] Cancelar, o contraseña incorrecta: mensaje tranquilo y el botón sigue disponible.
+- [ ] No queda ningún archivo `analizador-disco-*.json` en la carpeta temporal del usuario (`%TEMP%`).
+
+**Linux con agente de polkit** (GNOME, KDE, Cinnamon... con el `.deb` instalado)
+
+- [ ] Pulsar el botón abre la ventana de contraseña, con el mensaje en español de Analizador de disco.
+- [ ] Contraseña correcta: aparecen los datos de todos los discos.
+- [ ] Una segunda lectura en los minutos siguientes no vuelve a pedir la contraseña.
+- [ ] Cerrar la ventana: mensaje tranquilo y el botón sigue disponible.
+- [ ] `ls -l /usr/lib/analizador-disco/ayudante` muestra propietario `root` y sin permiso de escritura para otros.
+
+**Linux sin agente de polkit** (sesión mínima, o por SSH)
+
+- [ ] Pulsar el botón (o `analizador-disco cli salud --elevar`) no se queda colgado: indica el comando `sudo` alternativo.
+- [ ] `sudo analizador-disco cli salud` muestra todos los discos.
+
+**Terminal**
+
+- [ ] `salud` sin permisos indica que se puede añadir `--elevar`.
+- [ ] `salud --elevar` pide los permisos y muestra todos los discos.
 
 ## 7. Otras secciones
 

@@ -120,6 +120,47 @@ El flujo generará `SHA256SUMS-linux.txt.asc`. Quien descargue lo comprueba con
   así que ahí la firma simplemente se omite.
 - Si un certificado se filtra, revócalo con la entidad emisora y borra el secreto.
 
+## El ayudante de salud y los permisos
+
+Leer SMART exige administrador en algunos discos. La aplicación nunca corre
+con privilegios: cuando el usuario pulsa "Dar permiso y leer salud" se lanza
+solo el ayudante (`--helper`), definido en `core/ayudante.py`, y todo pasa por
+`core/privilegios.py`.
+
+- **Windows**: `ShellExecuteExW` con el verbo `runas`. El resultado se lee de
+  un archivo temporal de nombre aleatorio que crea la aplicación; el ayudante
+  solo puede rellenar ese archivo (debe existir, estar vacío y llamarse como
+  los que crea la aplicación) y se borra al terminar.
+- **Linux**: `pkexec` y la política
+  `instalador/linux/io.github.alonsogvg21bit.analizador-disco.policy`
+  (`auth_admin_keep`, mensaje en español).
+
+### Por qué el ayudante debe estar en una carpeta de root (Linux)
+
+El paquete `.deb` instala el programa en `/usr/lib/analizador-disco/programa/`
+y el lanzador del ayudante en `/usr/lib/analizador-disco/ayudante`. Esa
+carpeta pertenece a root y un usuario normal no puede escribir en ella.
+
+Es imprescindible: polkit ejecuta ese archivo como administrador. Si estuviera
+en una carpeta del usuario (su carpeta personal, `/tmp`...), cualquier
+programa que corra con sus permisos podría sustituirlo y conseguir que su
+propio código se ejecutara como root la próxima vez que se concedieran los
+permisos. Por eso la política de polkit apunta a esa ruta exacta, y el
+lanzador añade siempre `--helper`, de modo que con privilegios solo se puede
+entrar en el modo ayudante.
+
+Con la AppImage o el `.tar.gz`, que viven en carpetas del usuario, no hay
+política instalada: `pkexec` muestra su aviso genérico y pide la contraseña
+cada vez. Funciona, pero para uso habitual se recomienda el `.deb`.
+
+### Si cambias el ayudante
+
+- No añadas acciones sin necesidad, ni ninguna que reciba rutas o comandos.
+- No uses `shell=True`; llama a smartctl con lista de argumentos y ruta absoluta.
+- La validación del disco usa `fullmatch`, no `match`: con `$` se colaría un
+  nombre terminado en salto de línea.
+- `tests/test_privilegios.py` comprueba todo lo anterior.
+
 ## Licencias al distribuir
 
 - El paquete incluye `LICENSE` y `NOTICE`, visibles desde "Acerca de".
