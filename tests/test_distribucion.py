@@ -1,10 +1,9 @@
 """Pruebas de lo añadido para distribuir el programa a otras personas:
-registro de acciones, carpetas protegidas ampliadas, doble confirmación,
-permisos de administrador solo para la salud y rutas del paquete."""
+registro de acciones, carpetas protegidas ampliadas, doble confirmación y
+rutas del paquete. (Los permisos de la salud están en test_privilegios.py.)"""
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import sys
@@ -15,13 +14,10 @@ import pytest
 from cli.comandos import ejecutar
 from core import limpieza, registro
 from core.basura import ANTIGUOS, DUPLICADOS, REGENERABLES, detectar_basura
-from core.elevacion import EXPLICACION, leer_salud_con_permisos, volcar_salud
 from core.escaner import escanear
 from core.limpieza import UMBRAL_DOBLE_CONFIRMACION, limpiar, requiere_doble_confirmacion
 from core.modelos import ElementoBasura
 from core.mover import mover
-from core.salud import BUENO, DESCONOCIDO, ErrorSalud, interpretar
-from tests.test_salud import SmartctlFalso, ejemplo
 from utils import rutas
 from utils.seguridad import carpetas_personales, en_carpeta_personal, es_ruta_protegida
 
@@ -236,56 +232,6 @@ def test_el_registro_rota_al_crecer(monkeypatch):
 def test_el_registro_no_admite_lineas_falsas():
     registro.anotar("papelera", "hecho", 1, "nombre\ncon salto\tde línea", "detalle\nraro")
     assert len(registro.ultimas_lineas()) == 1
-
-
-# ------------------------------------------------------------ 12. permisos solo para la salud
-
-def test_la_falta_de_permisos_se_marca_en_el_disco():
-    assert interpretar(ejemplo("sin_permisos_windows_real"), "/dev/sdb").falta_permiso is True
-    assert interpretar(ejemplo("usb_sin_smart")).falta_permiso is False
-    assert interpretar(ejemplo("hdd_sano")).falta_permiso is False
-
-
-def test_volcar_salud_no_sobrescribe(tmp_path):
-    destino = tmp_path / "salud.json"
-    assert volcar_salud(destino, SmartctlFalso()) == 3
-    datos = json.loads(destino.read_text(encoding="utf-8"))
-    assert [d["nombre"] for d in datos] == ["/dev/sda", "/dev/sdb", "/dev/nvme0"]
-    with pytest.raises(FileExistsError):
-        volcar_salud(destino, SmartctlFalso())
-
-
-def test_leer_salud_con_permisos(datos_aislados):
-    comandos = []
-
-    def proceso_elevado(comando):
-        """Hace lo que haría el proceso con permisos: escribir el archivo pedido."""
-        comandos.append(comando)
-        volcar_salud(comando[-1], SmartctlFalso({"/dev/sda": "hdd_sano", "/dev/sdb": "ssd_sata",
-                                                 "/dev/nvme0": "nvme_sano"}))
-        return 0
-
-    discos = leer_salud_con_permisos(lanzar=proceso_elevado)
-    assert [d.estado for d in discos] == [BUENO, BUENO, BUENO]
-    # Lo único que se ejecuta con permisos es la lectura; nada más.
-    assert comandos[0][-4:-1] == ["cli", "salud", "volcar"]
-    assert Path(comandos[0][-1]).parent == datos_aislados
-    assert list(datos_aislados.glob("salud-*.json")) == []          # el archivo temporal se borra
-
-
-def test_si_no_se_conceden_los_permisos(datos_aislados):
-    with pytest.raises(ErrorSalud, match="No se concedieron"):
-        leer_salud_con_permisos(lanzar=lambda comando: 1)
-    assert "administrador" in EXPLICACION and "No se escribe" in EXPLICACION
-
-
-def test_cli_salud_volcar(tmp_path, capsys, monkeypatch):
-    from core import salud
-    monkeypatch.setattr(salud, "_ejecutar", SmartctlFalso())
-    destino = tmp_path / "volcado.json"
-    assert ejecutar(["salud", "volcar", str(destino)]) == 0 and destino.exists()
-    assert ejecutar(["salud", "volcar", str(destino)]) == 1          # ya existe: no se toca
-    assert interpretar(json.loads(destino.read_text(encoding="utf-8"))[0]["datos"]).estado != DESCONOCIDO
 
 
 # ------------------------------------------------------------ 1. rutas en desarrollo y empaquetado

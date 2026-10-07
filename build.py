@@ -217,9 +217,22 @@ def paquete_deb() -> Path:
                                   text=True, check=True).stdout.strip()
     carpeta = RAIZ / "build" / "deb"
     shutil.rmtree(carpeta, ignore_errors=True)
-    shutil.copytree(APP, carpeta / "opt" / PAQUETE_LINUX, symlinks=True)
-    _escribir_ejecutable(carpeta / "usr" / "bin" / PAQUETE_LINUX,
-                         f'#!/bin/sh\nexec /opt/{PAQUETE_LINUX}/{NOMBRE_EJECUTABLE} "$@"\n')
+    # Todo el programa va en /usr/lib/analizador-disco, que pertenece a root.
+    # Es imprescindible para el ayudante de salud: polkit lo ejecuta como
+    # administrador, así que un usuario normal no debe poder modificarlo. Si
+    # estuviera en una carpeta del usuario, cualquiera podría cambiarlo y
+    # conseguir que su propio código se ejecutara con privilegios.
+    programa = carpeta / "usr" / "lib" / PAQUETE_LINUX / "programa"
+    shutil.copytree(APP, programa, symlinks=True)
+    en_disco = f"/usr/lib/{PAQUETE_LINUX}/programa/{NOMBRE_EJECUTABLE}"
+    _escribir_ejecutable(carpeta / "usr" / "bin" / PAQUETE_LINUX, f'#!/bin/sh\nexec {en_disco} "$@"\n')
+    # El ayudante es un lanzador fijo: siempre añade "--helper", de modo que con
+    # permisos de administrador solo se puede entrar en el modo ayudante.
+    _escribir_ejecutable(carpeta / "usr" / "lib" / PAQUETE_LINUX / "ayudante",
+                         f'#!/bin/sh\nexec {en_disco} --helper "$@"\n')
+    politica = carpeta / "usr" / "share" / "polkit-1" / "actions"
+    politica.mkdir(parents=True)
+    shutil.copy(INSTALADOR / "linux" / "io.github.alonsogvg21bit.analizador-disco.policy", politica)
     aplicaciones = carpeta / "usr" / "share" / "applications"
     aplicaciones.mkdir(parents=True)
     (aplicaciones / f"{PAQUETE_LINUX}.desktop").write_text(_entrada_de_escritorio(PAQUETE_LINUX), encoding="utf-8")

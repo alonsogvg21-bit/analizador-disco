@@ -160,7 +160,11 @@ def test_disco_sin_smart():
 def test_instrucciones_por_sistema():
     assert "winget install smartmontools" in instrucciones_de_instalacion(WINDOWS)
     assert "sudo apt install smartmontools" in instrucciones_de_instalacion(LINUX)
-    assert "Ejecutar como administrador" in instrucciones_de_permisos(WINDOWS)
+    # Ya no se pide cerrar el programa ni abrir PowerShell: se ofrece --elevar.
+    for sistema in (WINDOWS, LINUX):
+        texto = instrucciones_de_permisos(sistema)
+        assert "--elevar" in texto and "PowerShell" not in texto and "Cierra" not in texto
+    assert "Control de cuentas" in instrucciones_de_permisos(WINDOWS)
     assert "sudo" in instrucciones_de_permisos(LINUX)
 
 

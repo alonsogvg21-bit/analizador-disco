@@ -36,7 +36,18 @@ function tarjetaSalud(d) {
         el("div", { clase: "suave", texto: d.dispositivo }))));
 
   if (d.error) {
-    tarjeta.append(el("p", { clase: "suave", texto: d.error }));
+    // Lo que no necesita permisos se muestra igualmente: de qué disco se trata.
+    if (d.falta_permiso && (d.modelo || d.capacidad)) {
+      const tipoBasico = d.es_ssd ? "SSD" : d.es_ssd === false ? "Disco duro" : "Disco";
+      tarjeta.append(el("p", { clase: "suave", texto: `${tipoBasico} · ${tamanoLegible(d.capacidad)} · ${d.interfaz}` }));
+    }
+    tarjeta.append(el("p", { texto: d.error }));
+    if (d.falta_permiso) {
+      tarjeta.append(
+        el("p", { clase: "suave", texto: saludActual.explicacion || "" }),
+        el("button", { clase: "boton principal", type: "button", texto: "Dar permiso y leer salud",
+          onclick: darPermiso }));
+    }
     return tarjeta;
   }
 
@@ -60,7 +71,7 @@ function tarjetaSalud(d) {
   const horas = d.horas_encendido;
   const datos = el("dl", { clase: "datos" },
     fila("Horas de uso", horas === null ? "sin dato" : `${numero(horas)} (${(horas / 8766).toFixed(1)} años)`),
-    fila("Encendidos", oSinDato(d.ciclos_encendido)),
+    fila("Encendidos", oSinDato(d.ciclos_encendido) + (d.nota_encendidos ? " *" : "")),
     d.es_nvme ? fila("Errores de medio", oSinDato(d.errores_de_medio)) : null,
     d.es_nvme ? null : fila("Sectores reasignados", oSinDato(d.sectores_reasignados)),
     d.es_nvme ? null : fila("Sectores pendientes", oSinDato(d.sectores_pendientes)),
@@ -69,6 +80,9 @@ function tarjetaSalud(d) {
     fila("Número de serie", d.serie || "sin dato"));
   tarjeta.append(datos);
 
+  if (d.nota_encendidos) {
+    tarjeta.append(el("p", { clase: "suave", texto: `* ${d.nota_encendidos}` }));
+  }
   if (d.motivos.length) {
     tarjeta.append(el("ul", { clase: "motivos" }, ...d.motivos.map((m) => el("li", { texto: m }))));
   }
@@ -81,7 +95,11 @@ function tarjetaSalud(d) {
   const aviso = el("p", { clase: "suave", role: "status" });
   const lanzar = (tipoPrueba) => async () => {
     aviso.textContent = "Iniciando…";
-    try { aviso.textContent = (await enviar("/api/salud/prueba", { dispositivo: d.dispositivo, tipo: tipoPrueba })).mensaje; }
+    try {
+      // Si este disco se leyó con permisos, la autoprueba también los necesita.
+      aviso.textContent = (await enviar("/api/salud/prueba", {
+        dispositivo: d.dispositivo, tipo: tipoPrueba, elevar: saludActual.conPermiso })).mensaje;
+    }
     catch (error) { aviso.textContent = error.message; }
   };
   tarjeta.append(
@@ -95,9 +113,34 @@ function tarjetaSalud(d) {
   return tarjeta;
 }
 
+const saludActual = { explicacion: "", conPermiso: false };
+
+// Una sola petición de permisos lee todos los discos. Cancelarla no es un error.
+async function darPermiso() {
+  const nota = $("#salud-nota");
+  nota.hidden = true;
+  $("#btn-salud").disabled = true;
+  try {
+    const datos = await enviar("/api/salud/permiso");
+    if (datos.cancelado) {
+      nota.hidden = false;
+      nota.textContent = datos.mensaje;
+    } else {
+      saludActual.conPermiso = true;
+      pintarSalud(datos);
+    }
+  } catch (error) {
+    nota.hidden = false;
+    nota.textContent = error.message;
+  } finally {
+    $("#btn-salud").disabled = false;
+  }
+}
+
 function pintarSalud(datos) {
   const caja = $("#salud"), nota = $("#salud-nota");
   nota.hidden = true;
+  saludActual.explicacion = datos.explicacion || saludActual.explicacion;
   if (!datos.disponible) {
     // Falta smartctl: se muestran los pasos para instalarlo.
     caja.replaceChildren(el("div", { clase: "tarjeta" },
@@ -118,6 +161,7 @@ function pintarSalud(datos) {
 }
 
 async function cargarSalud(revisar) {
+  saludActual.conPermiso = false;
   const boton = $("#btn-salud");
   boton.disabled = true;
   boton.textContent = "Leyendo discos…";

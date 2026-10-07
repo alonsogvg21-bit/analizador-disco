@@ -33,6 +33,9 @@ from core.programador import ErrorProgramador, crear_tarea, listar_tareas, quita
 from core.reporte_pdf import exportar_pdf
 from core.alertas import leer_config
 from core.alertas import revisar as revisar_alertas
+from core.privilegios import (
+    PermisoCancelado, explicacion, iniciar_autoprueba_con_permiso, leer_salud_con_permiso,
+)
 from core.salud import (
     NOMBRES_ESTADO, ErrorSalud, SmartctlNoInstalado, iniciar_autoprueba, leer_todos,
 )
@@ -389,6 +392,7 @@ def crear_app(gestor: GestorEscaneo | None = None) -> Flask:
             disponible=True,
             discos=[{**a_dict(d), "nombre_estado": NOMBRES_ESTADO[d.estado]} for d in discos],
             alertas=[a_dict(a) for a in alertas],
+            explicacion=explicacion(),   # texto del botón de permisos, según el sistema
         )
 
     @app.get("/api/salud")
@@ -400,11 +404,32 @@ def crear_app(gestor: GestorEscaneo | None = None) -> Flask:
         """Lo usa el botón Actualizar: vuelve a leer y avisa si algo ha empeorado."""
         return salud_a_json(avisar=True)
 
+    @app.post("/api/salud/permiso")
+    def salud_con_permiso():
+        """Botón "Dar permiso y leer salud": el sistema pide los permisos en este mismo equipo."""
+        config = leer_config()
+        try:
+            discos = leer_salud_con_permiso(config.umbrales())
+        except PermisoCancelado as problema:
+            # Decir que no es una decisión del usuario, no un fallo.
+            return jsonify(cancelado=True, mensaje=str(problema))
+        except ErrorSalud as problema:
+            return error(str(problema), 400)
+        return jsonify(
+            disponible=True, cancelado=False, alertas=[], explicacion=explicacion(),
+            discos=[{**a_dict(d), "nombre_estado": NOMBRES_ESTADO[d.estado]} for d in discos])
+
     @app.post("/api/salud/prueba")
     def salud_prueba():
         datos = request.get_json(silent=True) or {}
+        disco, tipo = str(datos.get("dispositivo", "")), str(datos.get("tipo", "corta"))
         try:
-            mensaje = iniciar_autoprueba(str(datos.get("dispositivo", "")), str(datos.get("tipo", "corta")))
+            if datos.get("elevar") is True:
+                mensaje = iniciar_autoprueba_con_permiso(disco, tipo)
+            else:
+                mensaje = iniciar_autoprueba(disco, tipo)
+        except PermisoCancelado as problema:
+            return jsonify(mensaje=str(problema), cancelado=True)
         except ErrorSalud as problema:
             return error(str(problema), 400)
         return jsonify(mensaje=mensaje)

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Política de polkit de Analizador de disco.
+
+  Autoriza UNA sola cosa: ejecutar como administrador el ayudante de salud,
+  /usr/lib/analizador-disco/ayudante, que solo sabe leer los datos SMART de
+  los discos y lanzar sus autopruebas. No escribe datos en ellos.
+
+  auth_admin_keep: se pide la contraseña de un administrador y se recuerda
+  unos minutos, para no volver a pedirla en cada lectura.
+
+  El paquete .deb instala este archivo en /usr/share/polkit-1/actions/.
+-->
+<policyconfig>
+  <vendor>Analizador de disco</vendor>
+  <vendor_url>https://github.com/alonsogvg21-bit/analizador-disco</vendor_url>
+
+  <action id="io.github.alonsogvg21bit.analizador-disco.salud">
+    <description>Leer la salud de los discos</description>
+    <description xml:lang="es">Leer la salud de los discos</description>
+    <message>Analizador de disco necesita permisos de administrador para leer la salud (SMART) de tus discos. Solo se leen datos: no se escribe nada en ellos.</message>
+    <message xml:lang="es">Analizador de disco necesita permisos de administrador para leer la salud (SMART) de tus discos. Solo se leen datos: no se escribe nada en ellos.</message>
+    <icon_name>analizador-disco</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/analizador-disco/ayudante</annotate>
+  </action>
+</policyconfig>

@@ -1,17 +1,24 @@
 """Salud del disco: una tarjeta por disco con semáforo, medidores y autopruebas.
 
 Los datos vienen de core.salud (smartctl). Todo es lectura.
+
+La aplicación nunca pide permisos por su cuenta: ni al abrirse ni al entrar
+en esta sección. Solo si un disco los exige aparece en su tarjeta el botón
+"Dar permiso y leer salud", y es al pulsarlo cuando el sistema los pide.
+Lo que se ejecuta con permisos es únicamente el ayudante (core/ayudante.py).
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFormLayout, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QFormLayout, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
 from core.alertas import leer_config, revisar
-from core.elevacion import EXPLICACION, leer_salud_con_permisos
+from core.privilegios import (
+    PermisoCancelado, explicacion, iniciar_autoprueba_con_permiso, leer_salud_con_permiso,
+)
 from core.salud import (
     BUENO, MALO, NOMBRES_ESTADO, PRECAUCION, SaludDisco, SmartctlNoInstalado, iniciar_autoprueba,
     leer_todos,
@@ -24,6 +31,7 @@ from utils.formato import tamano_legible
 
 # Color y símbolo del semáforo. El estado también va escrito al lado.
 SEMAFORO = {BUENO: ("bueno", "✓"), PRECAUCION: ("aviso", "!"), MALO: ("critico", "✕")}
+TEXTO_BOTON_PERMISO = "Dar permiso y leer salud"
 
 
 def _leer(avisar: bool):
@@ -34,11 +42,19 @@ def _leer(avisar: bool):
     return discos, alertas
 
 
+def _leer_con_permiso():
+    """Se ejecuta en segundo plano: una sola petición de permisos para todos los discos."""
+    return leer_salud_con_permiso(leer_config().umbrales()), []
+
+
 class VistaSalud(QWidget):
     def __init__(self, ventana) -> None:
         super().__init__()
         self.ventana = ventana
         self._cargado = False
+        # True si la última lectura necesitó permisos: las autopruebas también los necesitarán.
+        self._con_permiso = False
+        self._botones_permiso: list[QPushButton] = []
 
         contenido = QWidget()
         caja = QVBoxLayout(contenido)
@@ -59,11 +75,6 @@ class VistaSalud(QWidget):
         self._nota = etiqueta("", "nota", ajustar=True)
         self._nota.hide()
         caja.addWidget(self._nota)
-        self._elevar = QPushButton("Leer con permisos de administrador…")
-        self._elevar.setToolTip("Antes de pedirlos se explica para qué son.")
-        self._elevar.clicked.connect(self.leer_con_permisos)
-        self._elevar.hide()
-        caja.addWidget(self._elevar, alignment=Qt.AlignmentFlag.AlignLeft)
         self._rejilla = QGridLayout()
         self._rejilla.setSpacing(14)
         caja.addLayout(self._rejilla)
@@ -77,43 +88,24 @@ class VistaSalud(QWidget):
         if not self._cargado:
             self.cargar(avisar=False)
 
+    # ------------------------------------------------------------ lectura normal (sin permisos)
+
     def cargar(self, avisar: bool) -> None:
         self._cargado = True
-        self._actualizar.setEnabled(False)
-        self._actualizar.setText("Leyendo discos…")
+        self._con_permiso = False
+        self._ocupado(True)
         self.ventana.lanzar(_leer, avisar, al_terminar=self._mostrar, al_fallar=self._fallo)
 
-    def leer_con_permisos(self) -> None:
-        """Explica por qué hacen falta los permisos y, solo si se acepta, los pide."""
-        aviso = QMessageBox(self)
-        aviso.setWindowTitle("Permisos de administrador")
-        aviso.setIcon(QMessageBox.Icon.Information)
-        aviso.setText(EXPLICACION)
-        continuar = aviso.addButton("Continuar", QMessageBox.ButtonRole.AcceptRole)
-        aviso.setDefaultButton(aviso.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole))
-        aviso.exec()
-        if aviso.clickedButton() is not continuar:
-            return
-        self._actualizar.setEnabled(False)
-        self._elevar.setEnabled(False)
-        self._actualizar.setText("Leyendo discos…")
-        self.ventana.lanzar(
-            lambda: (leer_salud_con_permisos(leer_config().umbrales()), []),
-            al_terminar=self._mostrar, al_fallar=self._fallo_permisos)
-
-    def _fallo_permisos(self, problema: Exception) -> None:
-        self._fin()
-        self._nota.setText(str(problema))
-        self._nota.show()
-
-    def _fin(self) -> None:
-        self._elevar.setEnabled(True)
-        self._actualizar.setEnabled(True)
-        self._actualizar.setText("Actualizar")
+    def _ocupado(self, ocupado: bool) -> None:
+        self._actualizar.setEnabled(not ocupado)
+        self._actualizar.setText("Leyendo discos…" if ocupado else "Actualizar")
+        for boton in self._botones_permiso:
+            boton.setEnabled(not ocupado)
 
     def _fallo(self, problema: Exception) -> None:
-        self._fin()
+        self._ocupado(False)
         limpiar_caja(self._rejilla)
+        self._botones_permiso = []
         tarjeta = Tarjeta()
         titulo = ("No se puede leer la salud de los discos todavía"
                   if isinstance(problema, SmartctlNoInstalado) else "No se pudo leer la salud de los discos")
@@ -123,20 +115,43 @@ class VistaSalud(QWidget):
 
     def _mostrar(self, datos) -> None:
         discos, alertas = datos
-        self._fin()
         limpiar_caja(self._rejilla)
+        self._botones_permiso = []
         if not discos:
             self._rejilla.addWidget(etiqueta("No se detectó ningún disco.", "suave"), 0, 0)
         for indice, disco in enumerate(discos):
             self._rejilla.addWidget(self._tarjeta(disco), indice // 2, indice % 2)
-        # Solo si algún disco lo exige se ofrece leer con permisos de administrador.
-        self._elevar.setVisible(any(d.falta_permiso for d in discos))
         self._rejilla.setColumnStretch(0, 1)
         self._rejilla.setColumnStretch(1, 1)
+        self._ocupado(False)
         self._nota.setVisible(bool(alertas))
         if alertas:
             self._nota.setText(f"Se han enviado {len(alertas)} alertas: " + "; ".join(a.titulo for a in alertas))
         self.ventana.estado(f"Salud leída de {len(discos)} discos.")
+
+    # ------------------------------------------------------------ lectura con permisos (solo al pulsar)
+
+    def dar_permiso(self) -> None:
+        """El usuario ha pulsado el botón: se piden los permisos una vez y se leen todos los discos."""
+        self._nota.hide()
+        self._ocupado(True)
+        self.ventana.estado("Esperando a que concedas los permisos…")
+        self.ventana.lanzar(_leer_con_permiso, al_terminar=self._leido_con_permiso,
+                            al_fallar=self._sin_permiso)
+
+    def _leido_con_permiso(self, datos) -> None:
+        self._con_permiso = True
+        self._mostrar(datos)
+
+    def _sin_permiso(self, problema: Exception) -> None:
+        """Cancelar la petición no es un error: se explica con calma y el botón sigue disponible."""
+        self._ocupado(False)
+        self._nota.setText(str(problema))
+        self._nota.show()
+        self.ventana.estado("No se concedieron los permisos." if isinstance(problema, PermisoCancelado)
+                            else "No se pudieron pedir los permisos.")
+
+    # ------------------------------------------------------------ tarjeta de un disco
 
     def _tarjeta(self, d: SaludDisco) -> Tarjeta:
         tarjeta = Tarjeta()
@@ -158,12 +173,27 @@ class VistaSalud(QWidget):
         cabecera.addLayout(textos, 1)
         tarjeta.caja.addLayout(cabecera)
 
+        tipo = "SSD NVMe" if d.es_nvme else "SSD" if d.es_ssd else "Disco duro" if d.es_ssd is False else "Disco"
+
         if d.error:
-            tarjeta.caja.addWidget(etiqueta(d.error, "suave", ajustar=True))
+            if d.falta_permiso:
+                # Lo que no necesita permisos se muestra igualmente.
+                if d.capacidad or d.interfaz:
+                    datos = " · ".join(p for p in (tipo, tamano_legible(d.capacidad) if d.capacidad else "",
+                                                   d.interfaz) if p)
+                    tarjeta.caja.addWidget(etiqueta(datos, "suave"))
+                tarjeta.caja.addWidget(etiqueta(d.error, ajustar=True))
+                tarjeta.caja.addWidget(etiqueta(explicacion(), "suave", ajustar=True))
+                boton = QPushButton(TEXTO_BOTON_PERMISO)
+                boton.setObjectName("principal")
+                boton.clicked.connect(self.dar_permiso)
+                self._botones_permiso.append(boton)
+                tarjeta.caja.addWidget(boton, alignment=Qt.AlignmentFlag.AlignLeft)
+            else:
+                tarjeta.caja.addWidget(etiqueta(d.error, "suave", ajustar=True))
             tarjeta.caja.addStretch(1)
             return tarjeta
 
-        tipo = "SSD NVMe" if d.es_nvme else "SSD" if d.es_ssd else "Disco duro" if d.es_ssd is False else "Disco"
         tarjeta.caja.addWidget(etiqueta(f"{tipo} · {tamano_legible(d.capacidad)} · {d.interfaz}", "suave"))
 
         def medidor(titulo: str, porcentaje: float, valor: str, nivel_barra: str, nota: str) -> None:
@@ -193,7 +223,7 @@ class VistaSalud(QWidget):
         datos.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
         horas = d.horas_encendido
         filas = [("Horas de uso", "sin dato" if horas is None else f"{horas:,} ({horas / 8766:.1f} años)"),
-                 ("Encendidos", dato(d.ciclos_encendido))]
+                 ("Encendidos", dato(d.ciclos_encendido) + (" *" if d.nota_encendidos else ""))]
         if d.es_nvme:
             filas.append(("Errores de medio", dato(d.errores_de_medio)))
         else:
@@ -204,6 +234,8 @@ class VistaSalud(QWidget):
         for nombre, valor in filas:
             datos.addRow(etiqueta(nombre, "suave"), etiqueta(valor))
         tarjeta.caja.addLayout(datos)
+        if d.nota_encendidos:
+            tarjeta.caja.addWidget(etiqueta(f"* {d.nota_encendidos}", "suave", ajustar=True))
 
         for motivo in d.motivos:
             tarjeta.caja.addWidget(etiqueta(f"•  {motivo}", ajustar=True))
@@ -237,9 +269,11 @@ class VistaSalud(QWidget):
 
     def _probar(self, dispositivo: str, tipo: str, aviso: QLabel) -> None:
         aviso.setText("Iniciando…")
-        self.ventana.lanzar(iniciar_autoprueba, dispositivo, tipo,
-                            al_terminar=aviso.setText, al_fallar=lambda problema: aviso.setText(str(problema)))
+        # Si los discos se leyeron con permisos, la autoprueba también los necesita.
+        funcion = iniciar_autoprueba_con_permiso if self._con_permiso else iniciar_autoprueba
+        self.ventana.lanzar(funcion, dispositivo, tipo, al_terminar=aviso.setText,
+                            al_fallar=lambda problema: aviso.setText(str(problema)))
 
     def al_cambiar_tema(self) -> None:
-        if self._cargado:
+        if self._cargado and not self._con_permiso:
             self.cargar(avisar=False)   # el semáforo lleva colores del tema

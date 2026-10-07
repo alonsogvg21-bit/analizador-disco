@@ -32,6 +32,8 @@ NOMBRES_ESTADO = {
 GRAVEDAD = {DESCONOCIDO: 0, BUENO: 1, PRECAUCION: 2, MALO: 3}
 
 TIPOS_DE_PRUEBA = {"corta": "short", "larga": "long"}
+# Más encendidos por hora de uso que esto no puede ser "encender el equipo".
+ENCENDIDOS_POR_HORA_CREIBLES = 2
 
 # Identificadores de los atributos SMART de discos SATA que se consultan.
 ATR_REASIGNADOS = 5       # sectores dañados que el disco sustituyó por otros de reserva
@@ -107,6 +109,7 @@ class SaludDisco:
     motivos: list[str] = field(default_factory=list)
     error: str = ""                      # por qué no hay datos, si no los hay
     falta_permiso: bool = False          # no se pudo leer por no ser administrador
+    nota_encendidos: str = ""            # aclaración si el contador de encendidos no es fiable
 
     @property
     def clave(self) -> str:
@@ -130,29 +133,42 @@ def instrucciones_de_instalacion(sistema: str | None = None) -> str:
         "  Arch / Manjaro:          sudo pacman -S smartmontools")
 
 
+FALTA_PERMISO = "Para leer la salud de este disco el sistema exige permisos de administrador."
+
+
 def instrucciones_de_permisos(sistema: str | None = None) -> str:
+    """Cómo conseguir los permisos desde la terminal. (En el escritorio y la web hay un botón.)"""
     if (sistema or sistema_actual()) == WINDOWS:
-        return (
-            "Hacen falta permisos de administrador para leer SMART. Cierra el programa, abre "
-            "PowerShell con clic derecho > 'Ejecutar como administrador' y vuelve a lanzarlo "
-            "desde ahí (python main.py  o  python main.py cli salud).")
-    return (
-        "Hacen falta permisos de administrador para leer SMART. Ejecuta el programa con sudo: "
-        "sudo python3 main.py cli salud  (o  sudo python3 main.py).")
+        return ("Algunos discos exigen permisos de administrador. Añade --elevar para que "
+                "Windows te los pida (verás el aviso de Control de cuentas de usuario):\n"
+                "    salud --elevar")
+    return ("Algunos discos exigen permisos de administrador. Añade --elevar para que el "
+            "sistema te pida la contraseña, o ejecuta el comando con sudo:\n"
+            "    salud --elevar")
 
 
 # ---------------------------------------------------------------- llamar a smartctl
 
 def buscar_smartctl() -> str | None:
+    """Ruta ABSOLUTA de smartctl, o None si no está instalado.
+
+    Se devuelve siempre la ruta completa para que nunca se ejecute, por error
+    o por engaño, otro programa llamado igual que esté en la carpeta actual.
+    """
     encontrado = shutil.which("smartctl")
     if encontrado:
-        return encontrado
-    # El instalador de Windows no siempre añade la carpeta al PATH.
-    for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
-        if base:
-            candidato = Path(base) / "smartmontools" / "bin" / "smartctl.exe"
-            if candidato.is_file():
-                return str(candidato)
+        return os.path.abspath(encontrado)
+    candidatos = [
+        # El instalador de Windows no siempre añade la carpeta al PATH.
+        Path(base) / "smartmontools" / "bin" / "smartctl.exe"
+        for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")) if base
+    ] + [
+        # En Linux suele estar en sbin, que no siempre está en el PATH de un usuario normal.
+        Path("/usr/sbin/smartctl"), Path("/usr/local/sbin/smartctl"), Path("/sbin/smartctl"),
+    ]
+    for candidato in candidatos:
+        if candidato.is_file():
+            return str(candidato)
     return None
 
 
@@ -324,7 +340,7 @@ def interpretar(datos: dict, dispositivo: str = "", umbrales: Umbrales | None = 
     if not tiene_smart:
         codigo = datos.get("smartctl", {}).get("exit_status", 0)
         if _sin_permisos(datos):
-            disco.error = instrucciones_de_permisos()
+            disco.error = FALTA_PERMISO
             disco.falta_permiso = True
         elif codigo & _SALIDA_NO_ABRE:
             disco.error = "No se pudo abrir el disco: " + (_mensajes(datos) or "sin más detalles") + "."
@@ -353,6 +369,15 @@ def interpretar(datos: dict, dispositivo: str = "", umbrales: Umbrales | None = 
     disco.limite_temperatura = umbrales.temperatura_para(disco.es_nvme)
     disco.horas_encendido = datos.get("power_on_time", {}).get("hours")
     disco.ciclos_encendido = datos.get("power_cycle_count")
+    if (disco.horas_encendido and disco.ciclos_encendido
+            and disco.ciclos_encendido / disco.horas_encendido > ENCENDIDOS_POR_HORA_CREIBLES):
+        # El número es el que da el disco (se ha comparado con smartctl), pero
+        # nadie enciende un equipo varias veces por hora durante años. Algunos
+        # SSD, sobre todo en portátiles, suman aquí cada vez que el sistema los
+        # duerme para ahorrar energía. No indica ningún problema de salud.
+        disco.nota_encendidos = (
+            "Este disco también cuenta como encendido cada vez que el sistema lo pone en reposo "
+            "para ahorrar energía, así que la cifra no equivale a arranques del equipo.")
 
     if disco.es_nvme:
         disco.errores_de_medio = nvme.get("media_errors")
@@ -408,7 +433,31 @@ def leer_disco(nombre: str, tipo: str = "", ejecutar: Ejecutor | None = None,
 
 def leer_todos(ejecutar: Ejecutor | None = None, umbrales: Umbrales | None = None) -> list[SaludDisco]:
     """Salud de todos los discos detectados. Lanza SmartctlNoInstalado si falta el programa."""
-    return [leer_disco(d["name"], d["type"], ejecutar, umbrales) for d in listar_discos(ejecutar)]
+    discos = [leer_disco(d["name"], d["type"], ejecutar, umbrales) for d in listar_discos(ejecutar)]
+    completar_datos_basicos(discos)
+    return discos
+
+
+def completar_datos_basicos(discos: list[SaludDisco], basicos: dict[str, dict] | None = None) -> None:
+    """Rellena modelo, capacidad y tipo de los discos que no se pudieron leer por falta de permisos.
+
+    Esos datos se obtienen del sistema sin privilegios, para que la tarjeta
+    diga al menos de qué disco se trata.
+    """
+    pendientes = [d for d in discos if d.falta_permiso]
+    if not pendientes:
+        return
+    if basicos is None:
+        from core.discos_fisicos import info_basica
+        basicos = info_basica()
+    for disco in pendientes:
+        dato = basicos.get(disco.dispositivo)
+        if dato:
+            disco.modelo = disco.modelo or dato.get("modelo", "")
+            disco.capacidad = disco.capacidad or dato.get("capacidad", 0)
+            disco.interfaz = disco.interfaz or dato.get("interfaz", "")
+            if disco.es_ssd is None:
+                disco.es_ssd = dato.get("es_ssd")
 
 
 def iniciar_autoprueba(nombre: str, tipo: str = "corta", ejecutar: Ejecutor | None = None) -> str:
@@ -426,15 +475,23 @@ def iniciar_autoprueba(nombre: str, tipo: str = "corta", ejecutar: Ejecutor | No
     conocidos = {d["name"]: d["type"] for d in listar_discos(ejecutar)}
     if nombre not in conocidos:
         raise ErrorSalud(f"No existe el disco {nombre}. Discos detectados: {', '.join(conocidos) or 'ninguno'}")
+    return mandar_autoprueba(nombre, conocidos[nombre], tipo, ejecutar)
 
+
+class FaltaPermiso(ErrorSalud):
+    """El sistema no deja hacer eso sin permisos de administrador."""
+
+
+def mandar_autoprueba(nombre: str, tipo_dispositivo: str, tipo: str, ejecutar: Ejecutor | None = None) -> str:
+    """Envía la orden de autoprueba a un disco YA validado. No comprueba el nombre."""
     argumentos = ["-t", TIPOS_DE_PRUEBA[tipo]]
-    if conocidos[nombre]:
-        argumentos += ["-d", conocidos[nombre]]
+    if tipo_dispositivo:
+        argumentos += ["-d", tipo_dispositivo]
     datos = _consultar(argumentos + [nombre], ejecutar)
 
     codigo = datos.get("smartctl", {}).get("exit_status", 0)
     if _sin_permisos(datos):
-        raise ErrorSalud(instrucciones_de_permisos())
+        raise FaltaPermiso(FALTA_PERMISO)
     if codigo != 0:
         raise ErrorSalud("El disco no pudo iniciar la autoprueba: "
                          + (_mensajes(datos) or f"código {codigo}") + ".")

@@ -35,8 +35,12 @@ from core.alertas import revisar as revisar_alertas
 from core.programador import (
     FRECUENCIAS, ErrorProgramador, crear_tarea, crear_tarea_salud, listar_tareas, quitar_tarea,
 )
+from core.privilegios import (
+    PermisoCancelado, iniciar_autoprueba_con_permiso, leer_salud_con_permiso,
+)
 from core.salud import (
-    NOMBRES_ESTADO, TIPOS_DE_PRUEBA, ErrorSalud, SaludDisco, iniciar_autoprueba, leer_todos,
+    FALTA_PERMISO, NOMBRES_ESTADO, TIPOS_DE_PRUEBA, ErrorSalud, FaltaPermiso, SaludDisco,
+    iniciar_autoprueba, instrucciones_de_permisos, leer_todos,
 )
 from core.reporte import exportar_csv, exportar_html, reunir_datos
 from core.reporte_pdf import exportar_pdf
@@ -294,6 +298,9 @@ def _imprimir_salud(disco: SaludDisco) -> None:
     print(f"\n{disco.dispositivo} — {disco.modelo or 'modelo desconocido'}   "
           f"[{NOMBRES_ESTADO[disco.estado].upper()}]")
     if disco.error:
+        if disco.falta_permiso and (disco.modelo or disco.capacidad):
+            tipo = "SSD" if disco.es_ssd else "Disco duro" if disco.es_ssd is False else "Disco"
+            print(f"  {tipo} · {tamano_legible(disco.capacidad)} · {disco.interfaz}")
         print(f"  {disco.error}")
         return
     tipo = "SSD NVMe" if disco.es_nvme else "SSD" if disco.es_ssd else "Disco duro" if disco.es_ssd is False else "?"
@@ -303,6 +310,8 @@ def _imprimir_salud(disco: SaludDisco) -> None:
     print(f"  Temperatura: {dato(disco.temperatura, ' °C')} (límite {disco.limite_temperatura} °C)   "
           f"Horas de uso: {dato(disco.horas_encendido)}{anios}   "
           f"Encendidos: {dato(disco.ciclos_encendido)}")
+    if disco.nota_encendidos:
+        print(f"  (Sobre «Encendidos»: {disco.nota_encendidos})")
     if disco.es_nvme:
         print(f"  Errores de medio: {dato(disco.errores_de_medio)}")
     else:
@@ -403,22 +412,30 @@ def cmd_salud(args: argparse.Namespace) -> int:
             print(f"Revisión de salud programada {cuando} a las {tarea.hora}.")
             print(f"Para quitarla:  python main.py cli programar quitar {tarea.nombre}")
             return 0
+        elevar = getattr(args, "elevar", False)
         if accion == "prueba":
-            print(iniciar_autoprueba(args.disco, args.tipo))
-            return 0
-        if accion == "volcar":
-            from core.elevacion import volcar_salud
-            print(f"Datos de {volcar_salud(args.archivo)} discos guardados.")
+            try:
+                print(iniciar_autoprueba_con_permiso(args.disco, args.tipo) if elevar
+                      else iniciar_autoprueba(args.disco, args.tipo))
+            except FaltaPermiso:
+                print(f"{FALTA_PERMISO}\n{instrucciones_de_permisos()} prueba {args.disco}", file=sys.stderr)
+                return 1
             return 0
 
         config = leer_config()
-        discos = leer_todos(umbrales=config.umbrales())
+        if elevar:
+            # Una sola petición de permisos para leer todos los discos.
+            discos = leer_salud_con_permiso(config.umbrales())
+        else:
+            discos = leer_todos(umbrales=config.umbrales())
         if not discos:
             print("smartctl no detectó ningún disco.")
             return 0
         _titulo("Salud de los discos")
         for disco in discos:
             _imprimir_salud(disco)
+        if any(disco.falta_permiso for disco in discos):
+            print(f"\n{instrucciones_de_permisos()}")
 
         if accion == "revisar":
             revision = revisar_alertas(discos, config)
@@ -427,6 +444,10 @@ def cmd_salud(args: argparse.Namespace) -> int:
                 print(f"  {alerta.titulo}. {alerta.texto}")
             for fallo in revision.fallos_de_envio:
                 print(f"  Aviso: {fallo}", file=sys.stderr)
+    except PermisoCancelado as problema:
+        # Decir que no a los permisos no es un error del programa.
+        print(f"\n{problema}")
+        return 0
     except (ErrorSalud, ErrorProgramador, OSError) as problema:
         print(f"\n{problema}", file=sys.stderr)
         return 1
@@ -838,19 +859,25 @@ def crear_parser() -> argparse.ArgumentParser:
                      help="carpetas a mostrar en cada lista (por defecto 20)")
 
     sub = nuevo("salud", cmd_salud,
-                "Salud de los discos con SMART (requiere smartctl y permisos de administrador). "
-                "Sin acción, muestra el estado de todos los discos.", ruta=False)
+                "Salud de los discos con SMART (requiere smartctl). Sin acción, muestra el "
+                "estado de todos los discos. Si algún disco exige permisos de administrador, "
+                "añade --elevar para que el sistema te los pida.", ruta=False)
+    ayuda_elevar = ("pedir permisos de administrador al sistema para leer los discos que lo "
+                    "exigen (solo se usan para esa lectura)")
+    sub.add_argument("--elevar", action="store_true", help=ayuda_elevar)
     acciones = sub.add_subparsers(dest="accion", metavar="acción")
-    acciones.add_parser("ver", help="mostrar el estado de todos los discos (por defecto)")
+    # La opción se repite en cada acción para poder escribirla al final; SUPPRESS
+    # evita que el valor por defecto de la acción pise el de "salud --elevar".
+    ver = acciones.add_parser("ver", help="mostrar el estado de todos los discos (por defecto)")
+    ver.add_argument("--elevar", action="store_true", default=argparse.SUPPRESS, help=ayuda_elevar)
     prueba = acciones.add_parser(
         "prueba", help="pedir al disco que se pruebe a sí mismo (no escribe datos)")
+    prueba.add_argument("--elevar", action="store_true", default=argparse.SUPPRESS, help=ayuda_elevar)
     prueba.add_argument("disco", metavar="DISCO", help="nombre que muestra 'salud', p. ej. /dev/sda")
     prueba.add_argument("--tipo", choices=tuple(TIPOS_DE_PRUEBA), default="corta",
                         help="corta (unos 2 minutos, por defecto) o larga (puede tardar horas)")
-    acciones.add_parser("revisar", help="mostrar el estado y avisar si algo ha empeorado")
-    volcar = acciones.add_parser(
-        "volcar", help="(uso interno) guardar los datos de smartctl en un archivo nuevo")
-    volcar.add_argument("archivo", metavar="ARCHIVO")
+    revisar = acciones.add_parser("revisar", help="mostrar el estado y avisar si algo ha empeorado")
+    revisar.add_argument("--elevar", action="store_true", default=argparse.SUPPRESS, help=ayuda_elevar)
     alertas = acciones.add_parser("alertas", help="ver o cambiar la configuración de las alertas")
     alertas.add_argument("--temperatura", type=_temperatura, default=_SIN_CAMBIO, metavar="GRADOS",
                          help="límite de temperatura en °C, o 'auto'")

@@ -585,29 +585,80 @@ def test_acerca_de_incluye_licencias_y_privacidad(app, ventana):
     assert "No se encontró" in texto_de("NO-EXISTE")
 
 
-def test_permisos_de_administrador_solo_si_un_disco_los_exige(app, ventana, monkeypatch):
+def botones_de_permiso(vista):
+    from desktop.vistas.salud import TEXTO_BOTON_PERMISO
+    return [b for b in vista.findChildren(type(vista._actualizar)) if b.text() == TEXTO_BOTON_PERMISO]
+
+
+def cargar_salud(app, ventana, monkeypatch, discos):
     from core import salud
     from tests.test_salud import SmartctlFalso
-    vista = ventana.vistas["Salud del disco"]
-
     monkeypatch.setattr(salud, "buscar_smartctl", lambda: "smartctl")
-    monkeypatch.setattr(salud, "_ejecutar", SmartctlFalso())
+    monkeypatch.setattr(salud, "_ejecutar", SmartctlFalso(discos))
+    monkeypatch.setattr("core.discos_fisicos.info_basica", lambda: {
+        "/dev/sdb": {"modelo": "Kingston XS1000", "capacidad": 1000204886016, "es_ssd": True, "interfaz": "USB"}})
+    vista = ventana.vistas["Salud del disco"]
     vista.cargar(avisar=False)
     esperar(app, lambda: vista._actualizar.isEnabled())
     app.processEvents()
-    assert vista._elevar.isHidden()                       # todo se lee sin permisos: no se ofrece
+    return vista
 
-    monkeypatch.setattr(salud, "_ejecutar", SmartctlFalso(
-        {"/dev/sda": "nvme_sano", "/dev/sdb": "sin_permisos_windows_real", "/dev/nvme0": "ssd_sata"}))
-    vista.cargar(avisar=False)
+
+PROTEGIDO = {"/dev/sda": "nvme_sano", "/dev/sdb": "sin_permisos_windows_real", "/dev/nvme0": "ssd_sata"}
+
+
+def test_el_boton_de_permiso_solo_aparece_si_un_disco_lo_exige(app, ventana, monkeypatch):
+    def prohibido(*a, **k):
+        raise AssertionError("abrir la sección nunca pide permisos")
+    monkeypatch.setattr("desktop.vistas.salud.leer_salud_con_permiso", prohibido)
+
+    vista = cargar_salud(app, ventana, monkeypatch,
+                         {"/dev/sda": "hdd_sano", "/dev/sdb": "ssd_sata", "/dev/nvme0": "nvme_sano"})
+    assert botones_de_permiso(vista) == []                 # todo se lee sin permisos
+
+    vista = cargar_salud(app, ventana, monkeypatch, PROTEGIDO)
+    assert len(botones_de_permiso(vista)) == 1             # solo en la tarjeta del disco protegido
+    textos = " ".join(e.text() for e in vista.findChildren(type(vista._nota)))
+    assert "Kingston XS1000" in textos and "931.5 GB" in textos       # lo que no necesita permisos
+    assert "No se escribe" in textos                                  # el porqué, en la propia tarjeta
+    assert "PowerShell" not in textos and "Cierra el programa" not in textos
+
+
+def test_dar_permiso_lee_todos_los_discos_de_una_vez(app, ventana, monkeypatch):
+    from tests.test_salud import ejemplo
+    from core.salud import interpretar
+    vista = cargar_salud(app, ventana, monkeypatch, PROTEGIDO)
+    peticiones = []
+
+    def con_permiso(umbrales):
+        peticiones.append(1)
+        return [interpretar(ejemplo(nombre), disco) for disco, nombre in (
+            ("/dev/sda", "nvme_sano"), ("/dev/sdb", "hdd_sano"), ("/dev/nvme0", "ssd_sata"))]
+    monkeypatch.setattr("desktop.vistas.salud.leer_salud_con_permiso", con_permiso)
+
+    botones_de_permiso(vista)[0].click()
     esperar(app, lambda: vista._actualizar.isEnabled())
     app.processEvents()
-    assert not vista._elevar.isHidden()
+    assert peticiones == [1]                               # una sola petición
+    assert botones_de_permiso(vista) == [] and vista._con_permiso is True
+    assert "3 discos" in ventana._mensaje.text()
 
-    # Si se cancela la explicación, no se pide nada.
-    lanzados = []
-    monkeypatch.setattr("desktop.vistas.salud.leer_salud_con_permisos", lambda *a: lanzados.append(1) or [])
-    monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: None)
-    vista.leer_con_permisos()
+
+def test_cancelar_el_permiso_deja_el_boton_disponible(app, ventana, monkeypatch):
+    from core.privilegios import PermisoCancelado, mensaje_cancelado
+    from desktop.errores import DialogoError
+    vista = cargar_salud(app, ventana, monkeypatch, PROTEGIDO)
+    errores = []
+    monkeypatch.setattr(DialogoError, "exec", lambda self: errores.append(1) or 0)
+
+    def cancelar(umbrales):
+        raise PermisoCancelado(mensaje_cancelado())
+    monkeypatch.setattr("desktop.vistas.salud.leer_salud_con_permiso", cancelar)
+
+    botones_de_permiso(vista)[0].click()
+    esperar(app, lambda: vista._actualizar.isEnabled())
     app.processEvents()
-    assert lanzados == []
+    assert errores == []                                   # no se muestra como un error
+    assert not vista._nota.isHidden() and "No pasa nada" in vista._nota.text()
+    boton = botones_de_permiso(vista)[0]
+    assert boton.isEnabled() and vista._con_permiso is False

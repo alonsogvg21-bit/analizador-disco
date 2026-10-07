@@ -65,6 +65,14 @@ def preparar_salida(usar_terminal: bool) -> None:
 
 def main(argumentos: list[str] | None = None) -> int:
     argumentos = sys.argv[1:] if argumentos is None else argumentos
+
+    if argumentos and argumentos[0] == "--helper":
+        # Modo ayudante: sin ventanas ni consola, solo JSON. Es lo único que
+        # puede ejecutarse con privilegios; ver core/ayudante.py.
+        preparar_salida(usar_terminal=False)
+        from core.ayudante import main_ayudante
+        return main_ayudante(argumentos[1:])
+
     preparar_salida(usar_terminal=bool(argumentos))
 
     if not argumentos:
