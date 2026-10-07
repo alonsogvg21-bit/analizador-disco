@@ -34,11 +34,9 @@ from core.reporte_pdf import exportar_pdf
 from core.alertas import leer_config
 from core.alertas import revisar as revisar_alertas
 from core.privilegios import (
-    PermisoCancelado, explicacion, iniciar_autoprueba_con_permiso, leer_salud_con_permiso,
+    PermisoCancelado, explicacion, iniciar_autoprueba_pidiendo_permiso, leer_salud_con_permiso,
 )
-from core.salud import (
-    NOMBRES_ESTADO, ErrorSalud, SmartctlNoInstalado, iniciar_autoprueba, leer_todos,
-)
+from core.salud import NOMBRES_ESTADO, ErrorSalud, SmartctlNoInstalado, leer_todos
 from core.modelos import ElementoBasura
 from core.mover import mover
 from core.consulta import buscar_archivo
@@ -424,10 +422,8 @@ def crear_app(gestor: GestorEscaneo | None = None) -> Flask:
         datos = request.get_json(silent=True) or {}
         disco, tipo = str(datos.get("dispositivo", "")), str(datos.get("tipo", "corta"))
         try:
-            if datos.get("elevar") is True:
-                mensaje = iniciar_autoprueba_con_permiso(disco, tipo)
-            else:
-                mensaje = iniciar_autoprueba(disco, tipo)
+            # Si el disco exige permisos para la autoprueba, se piden en este momento.
+            mensaje = iniciar_autoprueba_pidiendo_permiso(disco, tipo, elevar_ya=datos.get("elevar") is True)
         except PermisoCancelado as problema:
             return jsonify(mensaje=str(problema), cancelado=True)
         except ErrorSalud as problema:

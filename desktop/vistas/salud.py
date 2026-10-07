@@ -17,11 +17,10 @@ from PySide6.QtWidgets import (
 
 from core.alertas import leer_config, revisar
 from core.privilegios import (
-    PermisoCancelado, explicacion, iniciar_autoprueba_con_permiso, leer_salud_con_permiso,
+    PermisoCancelado, explicacion, iniciar_autoprueba_pidiendo_permiso, leer_salud_con_permiso,
 )
 from core.salud import (
-    BUENO, MALO, NOMBRES_ESTADO, PRECAUCION, SaludDisco, SmartctlNoInstalado, iniciar_autoprueba,
-    leer_todos,
+    BUENO, MALO, NOMBRES_ESTADO, PRECAUCION, SaludDisco, SmartctlNoInstalado, leer_todos,
 )
 from desktop import estilos
 from desktop.componentes import (
@@ -253,8 +252,10 @@ class VistaSalud(QWidget):
         aviso = etiqueta("", "suave", ajustar=True)
         botones = QHBoxLayout()
         for tipo_prueba, titulo, ayuda in (
-            ("corta", "Prueba corta", "Unos 2 minutos. No escribe datos en el disco."),
-            ("larga", "Prueba larga", "Recorre todo el disco; puede tardar horas. No escribe datos."),
+            ("corta", "Prueba corta", "Unos 2 minutos. No escribe datos en el disco. "
+                                       "Puede pedir permisos de administrador."),
+            ("larga", "Prueba larga", "Recorre todo el disco; puede tardar horas. No escribe datos. "
+                                       "Puede pedir permisos de administrador."),
         ):
             boton = QPushButton(titulo)
             boton.setToolTip(ayuda)
@@ -268,10 +269,11 @@ class VistaSalud(QWidget):
         return tarjeta
 
     def _probar(self, dispositivo: str, tipo: str, aviso: QLabel) -> None:
-        aviso.setText("Iniciando…")
-        # Si los discos se leyeron con permisos, la autoprueba también los necesita.
-        funcion = iniciar_autoprueba_con_permiso if self._con_permiso else iniciar_autoprueba
-        self.ventana.lanzar(funcion, dispositivo, tipo, al_terminar=aviso.setText,
+        aviso.setText("Iniciando… Si el disco lo exige, el sistema te pedirá permisos de administrador.")
+        # Se intenta sin permisos y, solo si el disco lo exige, se piden. Si los
+        # discos ya se leyeron con permisos, se piden directamente.
+        self.ventana.lanzar(iniciar_autoprueba_pidiendo_permiso, dispositivo, tipo, self._con_permiso,
+                            al_terminar=aviso.setText,
                             al_fallar=lambda problema: aviso.setText(str(problema)))
 
     def al_cambiar_tema(self) -> None:

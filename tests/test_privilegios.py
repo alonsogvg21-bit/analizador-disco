@@ -537,3 +537,88 @@ def test_web_cancelar_el_permiso_no_es_un_error(web, smart, monkeypatch):
     respuesta = cliente.post("/api/salud/permiso", headers=token)
     assert respuesta.status_code == 200 and respuesta.get_json()["cancelado"] is True
     assert "No pasa nada" in respuesta.get_json()["mensaje"]
+
+
+# ------------------------------------------------------------ autopruebas que exigen permisos
+
+def smartctl_que_no_deja_probar(comando):
+    """Como el SSD real: se lee sin permisos, pero la autoprueba da 'Error=5' (acceso denegado)."""
+    if "--scan" in comando:
+        return 0, json.dumps({"devices": [{"name": "/dev/sda", "type": "nvme"}]}), ""
+    if "-t" in comando:
+        return 4, json.dumps({"smartctl": {"exit_status": 4, "messages": [{"severity": "error", "string":
+            "NVMe Self-test cmd with type=0x1, nsid=0xffffffff failed: "
+            "IOCTL_STORAGE_PROTOCOL_COMMAND(NVMe) failed, Error=5"}]}}), ""
+    return 0, json.dumps(ejemplo("nvme_sano")), ""
+
+
+def test_la_autoprueba_puede_exigir_permisos_aunque_la_lectura_no(monkeypatch):
+    from core.salud import FaltaPermiso, iniciar_autoprueba, leer_todos
+    monkeypatch.setattr(salud, "buscar_smartctl", lambda: "/usr/sbin/smartctl")
+    monkeypatch.setattr(salud, "_ejecutar", smartctl_que_no_deja_probar)
+    assert leer_todos()[0].estado == BUENO                       # leer funciona sin permisos
+    with pytest.raises(FaltaPermiso, match="autoprueba") as fallo:
+        iniciar_autoprueba("/dev/sda", "corta")
+    assert "Error=5" not in str(fallo.value) and "administrador" in str(fallo.value)
+
+
+def test_los_botones_de_prueba_piden_permiso_si_hace_falta(monkeypatch):
+    from core.privilegios import iniciar_autoprueba_pidiendo_permiso
+    monkeypatch.setattr(salud, "buscar_smartctl", lambda: "/usr/sbin/smartctl")
+    monkeypatch.setattr(salud, "_ejecutar", smartctl_que_no_deja_probar)
+    pedidos = []
+
+    def con_privilegios(comando):
+        pedidos.append(comando[-3:])
+        return 0, json.dumps({"ok": True, "datos": {"mensaje": "Autoprueba corta iniciada en /dev/sda."}})
+
+    mensaje = iniciar_autoprueba_pidiendo_permiso("/dev/sda", "corta", lanzar=con_privilegios,
+                                                  administrador=False)
+    assert "iniciada" in mensaje and pedidos == [["iniciar-autoprueba", "/dev/sda", "corta"]]
+
+
+def test_si_la_prueba_no_exige_permisos_no_se_piden(smart):
+    from core.privilegios import iniciar_autoprueba_pidiendo_permiso
+
+    def no_debe_llamarse(comando):
+        raise AssertionError("este disco deja lanzar la prueba sin permisos")
+    assert "iniciada" in iniciar_autoprueba_pidiendo_permiso("/dev/sda", "larga", lanzar=no_debe_llamarse,
+                                                             administrador=False)
+
+
+def test_cancelar_los_permisos_de_una_prueba(monkeypatch):
+    from core.privilegios import iniciar_autoprueba_pidiendo_permiso
+    monkeypatch.setattr(salud, "buscar_smartctl", lambda: "/usr/sbin/smartctl")
+    monkeypatch.setattr(salud, "_ejecutar", smartctl_que_no_deja_probar)
+
+    def cancelar(comando):
+        raise PermisoCancelado(mensaje_cancelado(WINDOWS))
+    with pytest.raises(PermisoCancelado, match="No pasa nada"):
+        iniciar_autoprueba_pidiendo_permiso("/dev/sda", "corta", lanzar=cancelar, administrador=False)
+
+
+def test_web_la_prueba_pide_permiso_y_cancelar_no_es_error(web, monkeypatch):
+    cliente, token = web
+    llamadas = []
+
+    def falso(disco, tipo, elevar_ya=False):
+        llamadas.append((disco, tipo, elevar_ya))
+        if tipo == "larga":
+            raise PermisoCancelado(mensaje_cancelado(WINDOWS))
+        return "Autoprueba corta iniciada en /dev/sda."
+    monkeypatch.setattr("web.app.iniciar_autoprueba_pidiendo_permiso", falso)
+
+    correcta = cliente.post("/api/salud/prueba", json={"dispositivo": "/dev/sda", "tipo": "corta"}, headers=token)
+    assert correcta.status_code == 200 and "iniciada" in correcta.get_json()["mensaje"]
+    cancelada = cliente.post("/api/salud/prueba", headers=token,
+                             json={"dispositivo": "/dev/sda", "tipo": "larga", "elevar": True})
+    assert cancelada.status_code == 200 and cancelada.get_json()["cancelado"] is True
+    assert llamadas == [("/dev/sda", "corta", False), ("/dev/sda", "larga", True)]
+
+
+def test_cli_prueba_sin_elevar_explica_que_hacer(monkeypatch, capsys):
+    monkeypatch.setattr(salud, "buscar_smartctl", lambda: "/usr/sbin/smartctl")
+    monkeypatch.setattr(salud, "_ejecutar", smartctl_que_no_deja_probar)
+    assert ejecutar(["salud", "prueba", "/dev/sda"]) == 1
+    error = capsys.readouterr().err
+    assert "autoprueba" in error and "--elevar" in error and "Error=5" not in error

@@ -25,7 +25,8 @@ from pathlib import Path
 from core import ayudante
 from core.programador import comando_del_programa
 from core.salud import (
-    ErrorSalud, SaludDisco, Umbrales, completar_datos_basicos, interpretar, listar_discos,
+    ErrorSalud, FaltaPermiso, SaludDisco, Umbrales, completar_datos_basicos, iniciar_autoprueba,
+    interpretar, listar_discos,
 )
 from utils.sistema import LINUX, WINDOWS, sistema_actual
 
@@ -74,9 +75,9 @@ def explicacion(sistema: str | None = None) -> str:
 
 def mensaje_cancelado(sistema: str | None = None) -> str:
     if (sistema or sistema_actual()) == WINDOWS:
-        return ("No se concedieron los permisos, así que no se ha leído la salud de ese disco. "
+        return ("No se concedieron los permisos, así que no se ha hecho nada. "
                 "No pasa nada: puedes volver a pulsar el botón cuando quieras.")
-    return ("No se introdujo la contraseña, así que no se ha leído la salud de ese disco. "
+    return ("No se introdujo la contraseña, así que no se ha hecho nada. "
             "No pasa nada: puedes volver a pulsar el botón cuando quieras.")
 
 
@@ -223,5 +224,23 @@ def leer_salud_con_permiso(umbrales: Umbrales | None = None, **opciones) -> list
 
 
 def iniciar_autoprueba_con_permiso(disco: str, tipo: str = "corta", **opciones) -> str:
-    """Lanza una autoprueba en un disco que exige permisos."""
+    """Lanza una autoprueba pidiendo permisos al sistema."""
     return ejecutar_ayudante(ayudante.INICIAR, disco, tipo, **opciones)["mensaje"]
+
+
+def iniciar_autoprueba_pidiendo_permiso(disco: str, tipo: str = "corta", elevar_ya: bool = False,
+                                        **opciones) -> str:
+    """Lanza una autoprueba; si el sistema exige permisos para ello, los pide.
+
+    Es lo que usan los botones "Prueba corta" y "Prueba larga": primero se
+    intenta sin permisos y, solo si el disco lo exige, se piden (el usuario
+    acaba de pulsar el botón, así que es él quien lo solicita). Muchos discos
+    dejan leer su salud sin permisos pero no lanzar una autoprueba.
+    Con elevar_ya=True se piden directamente, sin el primer intento.
+    """
+    if not elevar_ya:
+        try:
+            return iniciar_autoprueba(disco, tipo)
+        except FaltaPermiso:
+            pass
+    return iniciar_autoprueba_con_permiso(disco, tipo, **opciones)

@@ -94,7 +94,7 @@ function tarjetaSalud(d) {
       + (p.horas !== null ? `, a las ${numero(p.horas)} h de uso.` : ".");
   const aviso = el("p", { clase: "suave", role: "status" });
   const lanzar = (tipoPrueba) => async () => {
-    aviso.textContent = "Iniciando…";
+    aviso.textContent = "Iniciando… Si el disco lo exige, el sistema te pedirá permisos de administrador.";
     try {
       // Si este disco se leyó con permisos, la autoprueba también los necesita.
       aviso.textContent = (await enviar("/api/salud/prueba", {
